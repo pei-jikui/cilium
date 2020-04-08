@@ -33,13 +33,14 @@ import (
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/version"
-
 	gops "github.com/google/gops/agent"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
+
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -65,7 +66,8 @@ var (
 	apiServerPort  uint16
 	shutdownSignal = make(chan struct{})
 
-	ciliumK8sClient clientset.Interface
+	apiextensionsK8sClient apiextensionsclient.Interface
+	ciliumK8sClient        clientset.Interface
 )
 
 func initEnv() {
@@ -141,6 +143,14 @@ func runOperator(cmd *cobra.Command) {
 	}
 	close(k8sInitDone)
 
+	restConfig, err := k8s.CreateConfig()
+	if err != nil {
+		log.WithError(err).Fatal("Unable to get Kubernetes client config")
+	}
+	apiextensionsK8sClient, err = apiextensionsclient.NewForConfig(restConfig)
+	if err != nil {
+		log.WithError(err).Fatal("Unable to create apiextensions client")
+	}
 	ciliumK8sClient = k8s.CiliumClient()
 	k8sversion.Update(k8s.Client())
 	if !k8sversion.Capabilities().MinimalVersionMet {
@@ -159,7 +169,6 @@ func runOperator(cmd *cobra.Command) {
 
 	var (
 		nodeManager *ipam.NodeManager
-		err         error
 	)
 
 	switch option.Config.IPAM {
@@ -178,7 +187,9 @@ func runOperator(cmd *cobra.Command) {
 			log.WithError(err).Fatal("Unable to start AWS ENI allocator")
 		}
 
-		startSynchronizingCiliumNodes(nodeManager)
+		if err := startSynchronizingCiliumNodes(nodeManager); err != nil {
+			log.WithError(err).Fatal("Unable to start synchronizing Cilium nodes")
+		}
 	case option.IPAMAzure:
 		ipamAllocatorAzure, providerBuiltin := allocatorProviders["azure"]
 		if !providerBuiltin {
@@ -194,7 +205,9 @@ func runOperator(cmd *cobra.Command) {
 			log.WithError(err).Fatal("Unable to start Azure allocator")
 		}
 
-		startSynchronizingCiliumNodes(nodeManager)
+		if err := startSynchronizingCiliumNodes(nodeManager); err != nil {
+			log.WithError(err).Fatal("Unable to start synchronizing Cilium nodes")
+		}
 	}
 
 	if kvstoreEnabled() {
@@ -280,7 +293,10 @@ func runOperator(cmd *cobra.Command) {
 
 	switch option.Config.IdentityAllocationMode {
 	case option.IdentityAllocationModeCRD:
-		startManagingK8sIdentities()
+		if err := startManagingK8sIdentities(); err != nil {
+			log.WithError(err).Fatal(
+				"Unable to start managing Kubernetes identities")
+		}
 
 		if option.Config.IdentityGCInterval != 0 {
 			go startCRDIdentityGC()

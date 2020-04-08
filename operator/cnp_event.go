@@ -27,7 +27,7 @@ import (
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/policy/groups"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -146,6 +146,10 @@ func enableCNPWatcher() error {
 		cnpConverterFunc,
 		cnpStore,
 	)
+
+	if err := waitForCRD(apiextensionsK8sClient, "ciliumnetworkpolicies.cilium.io"); err != nil {
+		return err
+	}
 	go ciliumV2Controller.Run(wait.NeverStop)
 
 	controller.NewManager().UpdateController("cnp-to-groups",

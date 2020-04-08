@@ -19,14 +19,14 @@ import (
 	"time"
 
 	"github.com/cilium/cilium/pkg/controller"
-	"github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/k8s/informer"
 	"github.com/cilium/cilium/pkg/k8s/types"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
 
 	"github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -112,7 +112,7 @@ func handleIdentityUpdate(identity *types.Identity) {
 	}
 }
 
-func startManagingK8sIdentities() {
+func startManagingK8sIdentities() error {
 	identityStore = cache.NewStore(cache.DeletionHandlingMetaNamespaceKeyFunc)
 	identityInformer := informer.NewInformerWithStore(
 		cache.NewListWatchFromClient(ciliumK8sClient.CiliumV2().RESTClient(),
@@ -130,5 +130,9 @@ func startManagingK8sIdentities() {
 		identityStore,
 	)
 
+	if err := waitForCRD(apiextensionsK8sClient, "ciliumidentities"); err != nil {
+		return err
+	}
 	go identityInformer.Run(wait.NeverStop)
+	return nil
 }

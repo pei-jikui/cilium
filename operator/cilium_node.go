@@ -20,18 +20,18 @@ import (
 
 	"github.com/cilium/cilium/pkg/ipam"
 	"github.com/cilium/cilium/pkg/k8s"
-	"github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/k8s/informer"
 	k8sversion "github.com/cilium/cilium/pkg/k8s/version"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 )
 
-func startSynchronizingCiliumNodes(nodeManager *ipam.NodeManager) {
+func startSynchronizingCiliumNodes(nodeManager *ipam.NodeManager) error {
 	log.Info("Starting to synchronize CiliumNode custom resources...")
 
 	// TODO: The operator is currently storing a full copy of the
@@ -81,7 +81,11 @@ func startSynchronizingCiliumNodes(nodeManager *ipam.NodeManager) {
 		k8s.ConvertToCiliumNode,
 	)
 
+	if err := waitForCRD(apiextensionsK8sClient, "ciliumnodes.cilium.io"); err != nil {
+		return err
+	}
 	go ciliumNodeInformer.Run(wait.NeverStop)
+	return nil
 }
 
 func deleteCiliumNode(nodeManager *ipam.NodeManager, name string) {
