@@ -341,17 +341,6 @@ var _ = Describe("K8sDatapathConfig", func() {
 			Expect(testPodConnectivityAcrossNodes(kubectl)).Should(BeTrue(), "Connectivity test between nodes failed")
 		})
 
-		It("Check direct connectivity with per endpoint routes", func() {
-			deployCilium(map[string]string{
-				"global.tunnel":                 "disabled",
-				"global.autoDirectNodeRoutes":   "true",
-				"global.endpointRoutes.enabled": "true",
-				"global.ipv6.enabled":           "false",
-			})
-
-			Expect(testPodConnectivityAcrossNodes(kubectl)).Should(BeTrue(), "Connectivity test between nodes failed")
-		})
-
 		SkipItIf(helpers.DoesNotRunOnNetNextOr419Kernel, "Check BPF masquerading", func() {
 			defaultIface, err := kubectl.GetDefaultIface()
 			Expect(err).Should(BeNil(), "Failed to retrieve default iface")
@@ -365,6 +354,17 @@ var _ = Describe("K8sDatapathConfig", func() {
 
 			Expect(testPodConnectivityAcrossNodes(kubectl)).Should(BeTrue(), "Connectivity test between nodes failed")
 			Expect(testPodHTTPToOutside(kubectl, "http://google.com", false, false)).Should(BeTrue(), "Connectivity test to http://google.com failed")
+		})
+
+		It("Check direct connectivity with per endpoint routes", func() {
+			deployCilium(map[string]string{
+				"global.tunnel":                 "disabled",
+				"global.autoDirectNodeRoutes":   "true",
+				"global.endpointRoutes.enabled": "true",
+				"global.ipv6.enabled":           "false",
+			})
+
+			Expect(testPodConnectivityAcrossNodes(kubectl)).Should(BeTrue(), "Connectivity test between nodes failed")
 		})
 
 		It("Check connectivity with sockops and direct routing", func() {
