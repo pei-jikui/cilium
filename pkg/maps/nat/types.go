@@ -80,6 +80,8 @@ type NatKey6 struct {
 	tuple.TupleKey6Global
 }
 
+const SizeofNatKey6 = int(unsafe.Sizeof(NatKey6{}))
+
 // NewValue creates a new bpf.MapValue.
 func (k *NatKey6) NewValue() bpf.MapValue { return &NatEntry6{} }
 
