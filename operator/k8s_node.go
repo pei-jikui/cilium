@@ -47,12 +47,19 @@ import (
 func runNodeWatcher(nodeManager *ipam.NodeManager) error {
 	log.Info("Starting to synchronize k8s nodes to kvstore...")
 
-	ciliumNodeStore, err := store.JoinSharedStore(store.Configuration{
-		Prefix:     nodeStore.NodeStorePrefix,
-		KeyCreator: nodeStore.KeyCreator,
-	})
-	if err != nil {
-		return err
+	var ciliumNodeStore *store.SharedStore
+	if kvstoreEnabled() && option.Config.SyncK8sNodes {
+		log.Info("Starting to synchronize k8s nodes to kvstore...")
+		var err error
+		ciliumNodeStore, err = store.JoinSharedStore(store.Configuration{
+			Prefix:     nodeStore.NodeStorePrefix,
+			KeyCreator: nodeStore.KeyCreator,
+		})
+		if err != nil {
+			return err
+		}
+	} else {
+		log.Info("Starting k8s node watcher...")
 	}
 
 	k8sNodeStore, nodeController := informer.NewInformer(
@@ -64,7 +71,9 @@ func runNodeWatcher(nodeManager *ipam.NodeManager) error {
 			AddFunc: func(obj interface{}) {
 				if n := k8s.ObjToV1Node(obj); n != nil {
 					nodeNew := k8s.ParseNode(n, source.Kubernetes)
-					ciliumNodeStore.UpdateKeySync(context.TODO(), nodeNew)
+					if kvstoreEnabled() && option.Config.SyncK8sNodes {
+						ciliumNodeStore.UpdateKeySync(context.TODO(), nodeNew)
+					}
 				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
@@ -73,9 +82,10 @@ func runNodeWatcher(nodeManager *ipam.NodeManager) error {
 						if k8s.EqualV1Node(oldNode, newNode) {
 							return
 						}
-
-						newNode := k8s.ParseNode(newNode, source.Kubernetes)
-						ciliumNodeStore.UpdateKeySync(context.TODO(), newNode)
+						if kvstoreEnabled() && option.Config.SyncK8sNodes {
+							newNode := k8s.ParseNode(newNode, source.Kubernetes)
+							ciliumNodeStore.UpdateKeySync(context.TODO(), newNode)
+						}
 					}
 				}
 			},
@@ -94,8 +104,10 @@ func runNodeWatcher(nodeManager *ipam.NodeManager) error {
 						return
 					}
 				}
-				deletedNode := k8s.ParseNode(n, source.Kubernetes)
-				ciliumNodeStore.DeleteLocalKey(context.TODO(), deletedNode)
+				if kvstoreEnabled() && option.Config.SyncK8sNodes {
+					deletedNode := k8s.ParseNode(n, source.Kubernetes)
+					ciliumNodeStore.DeleteLocalKey(context.TODO(), deletedNode)
+				}
 				deleteCiliumNode(nodeManager, n.Name)
 			},
 		},
@@ -125,29 +137,33 @@ func runNodeWatcher(nodeManager *ipam.NodeManager) error {
 			}
 		}
 
-		listOfK8sNodes := k8sNodeStore.ListKeys()
+		if kvstoreEnabled() && option.Config.SyncK8sNodes {
+			listOfK8sNodes := k8sNodeStore.ListKeys()
 
-		kvStoreNodes := ciliumNodeStore.SharedKeysMap()
-		for _, k8sNode := range listOfK8sNodes {
-			// The remaining kvStoreNodes are leftovers
-			kvStoreNodeName := node.GetKeyNodeName(option.Config.ClusterName, k8sNode)
-			delete(kvStoreNodes, kvStoreNodeName)
-		}
+			kvStoreNodes := ciliumNodeStore.SharedKeysMap()
+			for _, k8sNode := range listOfK8sNodes {
+				// The remaining kvStoreNodes are leftovers
+				kvStoreNodeName := node.GetKeyNodeName(option.Config.ClusterName, k8sNode)
+				delete(kvStoreNodes, kvStoreNodeName)
+			}
 
-		for _, kvStoreNode := range kvStoreNodes {
-			if strings.HasPrefix(kvStoreNode.GetKeyName(), option.Config.ClusterName) {
-				ciliumNodeStore.DeleteLocalKey(context.TODO(), kvStoreNode)
+			for _, kvStoreNode := range kvStoreNodes {
+				if strings.HasPrefix(kvStoreNode.GetKeyName(), option.Config.ClusterName) {
+					ciliumNodeStore.DeleteLocalKey(context.TODO(), kvStoreNode)
+				}
 			}
 		}
-
 	}()
 
-	if option.Config.EnableCNPNodeStatusGC && option.Config.CNPNodeStatusGCInterval != 0 {
-		go runCNPNodeStatusGC("cnp-node-gc", false, ciliumNodeStore)
-	}
+	// FIXME: @aanm add CCNP and CNP node GC for non-kvstore mode
+	if kvstoreEnabled() && option.Config.SyncK8sNodes {
+		if option.Config.EnableCNPNodeStatusGC && option.Config.CNPNodeStatusGCInterval != 0 {
+			go runCNPNodeStatusGC("cnp-node-gc", false, ciliumNodeStore)
+		}
 
-	if option.Config.EnableCCNPNodeStatusGC && option.Config.CNPNodeStatusGCInterval != 0 {
-		go runCNPNodeStatusGC("ccnp-node-gc", true, ciliumNodeStore)
+		if option.Config.EnableCCNPNodeStatusGC && option.Config.CNPNodeStatusGCInterval != 0 {
+			go runCNPNodeStatusGC("ccnp-node-gc", true, ciliumNodeStore)
+		}
 	}
 
 	return nil
