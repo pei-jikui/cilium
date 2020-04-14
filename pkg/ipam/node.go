@@ -685,7 +685,7 @@ func (n *Node) syncToAPIServer() (err error) {
 		}
 
 		n.ops.PopulateStatusFields(node)
-		updatedNode, err = n.manager.k8sAPI.UpdateStatus(node, origNode)
+		updatedNode, err = n.manager.k8sAPI.UpdateStatus(origNode, node)
 		if updatedNode != nil && updatedNode.Name != "" {
 			node = updatedNode.DeepCopy()
 			if err == nil {
@@ -720,7 +720,7 @@ func (n *Node) syncToAPIServer() (err error) {
 			node.Spec.IPAM.PreAllocate = defaults.IPAMPreAllocation
 		}
 
-		updatedNode, err = n.manager.k8sAPI.Update(node, origNode)
+		updatedNode, err = n.manager.k8sAPI.Update(origNode, node)
 		if updatedNode != nil && updatedNode.Name != "" {
 			node = updatedNode.DeepCopy()
 			if err == nil {

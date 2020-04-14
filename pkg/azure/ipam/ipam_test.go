@@ -90,7 +90,7 @@ func (k *k8sMock) Create(node *v2.CiliumNode) (*v2.CiliumNode, error) {
 	return nil, nil
 }
 
-func (k *k8sMock) Update(node, origNode *v2.CiliumNode) (*v2.CiliumNode, error) {
+func (k *k8sMock) Update(origNode, node *v2.CiliumNode) (*v2.CiliumNode, error) {
 	k.mutex.Lock()
 	k.specRev++
 	k.latestCiliumNode[node.Name] = node
@@ -104,7 +104,7 @@ func (k *k8sMock) statusRevision() int {
 	return k.statusRev
 }
 
-func (k *k8sMock) UpdateStatus(node, origNode *v2.CiliumNode) (*v2.CiliumNode, error) {
+func (k *k8sMock) UpdateStatus(origNode, node *v2.CiliumNode) (*v2.CiliumNode, error) {
 	k.mutex.Lock()
 	k.statusRev++
 	k.latestCiliumNode[node.Name] = node

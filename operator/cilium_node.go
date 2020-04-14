@@ -103,7 +103,7 @@ func (c *ciliumNodeUpdateImplementation) Get(node string) (*v2.CiliumNode, error
 	return ciliumK8sClient.CiliumV2().CiliumNodes().Get(context.TODO(), node, metav1.GetOptions{})
 }
 
-func (c *ciliumNodeUpdateImplementation) UpdateStatus(node, origNode *v2.CiliumNode) (*v2.CiliumNode, error) {
+func (c *ciliumNodeUpdateImplementation) UpdateStatus(origNode, node *v2.CiliumNode) (*v2.CiliumNode, error) {
 	// If k8s supports status as a sub-resource, then we need to update the status separately
 	k8sCapabilities := k8sversion.Capabilities()
 	switch {
