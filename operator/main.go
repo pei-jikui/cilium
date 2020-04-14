@@ -22,7 +22,7 @@ import (
 
 	operatorMetrics "github.com/cilium/cilium/operator/metrics"
 	"github.com/cilium/cilium/pkg/components"
-	"github.com/cilium/cilium/pkg/ipam"
+	"github.com/cilium/cilium/pkg/ipam/allocator"
 	"github.com/cilium/cilium/pkg/k8s"
 	clientset "github.com/cilium/cilium/pkg/k8s/client/clientset/versioned"
 	"github.com/cilium/cilium/pkg/k8s/types"
@@ -158,7 +158,7 @@ func runOperator(cmd *cobra.Command) {
 	}
 
 	var (
-		nodeManager *ipam.NodeManager
+		nodeManager allocator.NodeEventHandler
 		err         error
 	)
 
