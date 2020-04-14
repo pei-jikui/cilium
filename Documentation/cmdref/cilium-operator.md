@@ -27,6 +27,8 @@ cilium-operator [flags]
       --config string                           Configuration file (default "$HOME/ciliumd.yaml")
       --config-dir string                       Configuration directory that contains a file for each option
   -D, --debug                                   Enable debugging mode
+      --enable-ipv4                             Enable IPv4 support (default true)
+      --enable-ipv6                             Enable IPv6 support (default true)
       --enable-k8s-endpoint-slice               Enables k8s EndpointSlice feature into Cilium-Operator if the k8s cluster supports it (default true)
       --enable-metrics                          Enable Prometheus metrics
       --eni-tags map                            ENI tags in the form of k1=v1 (multiple k/v pairs can be passed by repeating the CLI flag) (default map[])
@@ -35,6 +37,8 @@ cilium-operator [flags]
       --identity-gc-interval duration           GC interval for security identities (default 15m0s)
       --identity-heartbeat-timeout duration     Timeout after which identity expires on lack of heartbeat (default 15m0s)
       --ipam string                             Backend to use for IPAM (default "hostscope-legacy")
+      --ipv4-pod-cidr string                    IPv4 CIDR Range for Pods in cluster. Requires 'ipam=operator' and 'enable-ipv4=true'
+      --ipv6-pod-cidr string                    IPv6 CIDR Range for Pods in cluster. Requires 'ipam=operator' and 'enable-ipv6=true'
       --k8s-api-server string                   Kubernetes API server URL
       --k8s-client-burst int                    Burst value allowed for the K8s client
       --k8s-client-qps float32                  Queries per second limit for the K8s client
@@ -45,6 +49,8 @@ cilium-operator [flags]
       --kvstore-opt map                         Key-value store options (default map[])
       --limit-ipam-api-burst int                Upper burst limit when accessing external APIs (default 4)
       --limit-ipam-api-qps float                Queries per second limit when accessing external IPAM APIs (default 20)
+      --node-cidr-mask-size-ipv4 int            Mask size for each IPv4 podCIDR per node. Requires 'ipam=operator' and 'enable-ipv4=true' (default 24)
+      --node-cidr-mask-size-ipv6 int            Mask size for each IPv6 podCIDR per node. Requires 'ipam=operator' and 'enable-ipv6=true' (default 112)
       --nodes-gc-interval duration              GC interval for nodes store in the kvstore (default 2m0s)
       --operator-api-serve-addr string          Address to serve API requests (default "localhost:9234")
       --operator-prometheus-serve-addr string   Address to serve Prometheus metrics (default ":6942")

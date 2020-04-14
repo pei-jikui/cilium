@@ -137,6 +137,36 @@ func init() {
 	flags.String(option.IPAM, option.IPAMHostScopeLegacy, "Backend to use for IPAM")
 	option.BindEnv(option.IPAM)
 
+	flags.Bool(option.EnableIPv4Name, defaults.EnableIPv4, "Enable IPv4 support")
+	option.BindEnv(option.EnableIPv4Name)
+
+	flags.String(option.IPAMOperatorV4CIDR, "",
+		fmt.Sprintf("IPv4 CIDR Range for Pods in cluster. Requires '%s=%s' and '%s=%s'",
+			option.IPAM, option.IPAMOperator,
+			option.EnableIPv4Name, "true"))
+	option.BindEnv(option.IPAMOperatorV4CIDR)
+
+	flags.Int(option.NodeCIDRMaskSizeIPv4, 24,
+		fmt.Sprintf("Mask size for each IPv4 podCIDR per node. Requires '%s=%s' and '%s=%s'",
+			option.IPAM, option.IPAMOperator,
+			option.EnableIPv4Name, "true"))
+	option.BindEnv(option.NodeCIDRMaskSizeIPv4)
+
+	flags.Bool(option.EnableIPv6Name, defaults.EnableIPv6, "Enable IPv6 support")
+	option.BindEnv(option.EnableIPv6Name)
+
+	flags.String(option.IPAMOperatorV6CIDR, "",
+		fmt.Sprintf("IPv6 CIDR Range for Pods in cluster. Requires '%s=%s' and '%s=%s'",
+			option.IPAM, option.IPAMOperator,
+			option.EnableIPv6Name, "true"))
+	option.BindEnv(option.IPAMOperatorV6CIDR)
+
+	flags.Int(option.NodeCIDRMaskSizeIPv6, 112,
+		fmt.Sprintf("Mask size for each IPv6 podCIDR per node. Requires '%s=%s' and '%s=%s'",
+			option.IPAM, option.IPAMOperator,
+			option.EnableIPv6Name, "true"))
+	option.BindEnv(option.NodeCIDRMaskSizeIPv6)
+
 	flags.Duration(option.IdentityHeartbeatTimeout, 15*time.Minute, "Timeout after which identity expires on lack of heartbeat")
 	option.BindEnv(option.IdentityHeartbeatTimeout)
 

@@ -739,6 +739,26 @@ const (
 	// option.IPAM
 	IPAMAzure = "azure"
 
+	// IPAMOperator is the value to select the Operator IPAM mode for
+	// option.IPAM
+	IPAMOperator = "operator"
+
+	// IPAMOperatorV4CIDR is the cluster IPv4 podCIDR that should be used to
+	// allocate pods in the node.
+	IPAMOperatorV4CIDR = "ipv4-pod-cidr"
+
+	// IPAMOperatorV6CIDR is the cluster IPv6 podCIDR that should be used to
+	// allocate pods in the node.
+	IPAMOperatorV6CIDR = "ipv6-pod-cidr"
+
+	// NodeCIDRMaskSizeIPv4 is the IPv4 podCIDR mask size that will be used
+	// per node.
+	NodeCIDRMaskSizeIPv4 = "node-cidr-mask-size-ipv4"
+
+	// NodeCIDRMaskSizeIPv6 is the IPv6 podCIDR mask size that will be used
+	// per node.
+	NodeCIDRMaskSizeIPv6 = "node-cidr-mask-size-ipv6"
+
 	// ENITags are the tags that will be added to every ENI created by the AWS ENI IPAM
 	ENITags = "eni-tags"
 
@@ -1775,6 +1795,22 @@ type DaemonConfig struct {
 	// IPAM is the IPAM method to use
 	IPAM string
 
+	// IPAMOperatorV4CIDR is the cluster IPv4 podCIDR that should be used to
+	// allocate pods in the node.
+	IPAMOperatorV4CIDR string
+
+	// IPAMOperatorV6CIDR is the cluster IPv6 podCIDR that should be used to
+	// allocate pods in the node.
+	IPAMOperatorV6CIDR string
+
+	// NodeCIDRMaskSizeIPv4 is the IPv4 podCIDR mask size that will be used
+	// per node.
+	NodeCIDRMaskSizeIPv4 int
+
+	// NodeCIDRMaskSizeIPv6 is the IPv6 podCIDR mask size that will be used
+	// per node.
+	NodeCIDRMaskSizeIPv6 int
+
 	// AutoCreateCiliumNodeResource enables automatic creation of a
 	// CiliumNode resource for the local node
 	AutoCreateCiliumNodeResource bool
@@ -2354,6 +2390,8 @@ func (c *DaemonConfig) Populate() {
 	c.IdentityChangeGracePeriod = viper.GetDuration(IdentityChangeGracePeriod)
 	c.IdentityGCInterval = viper.GetDuration(IdentityGCInterval)
 	c.IPAM = viper.GetString(IPAM)
+	c.IPAMOperatorV4CIDR = viper.GetString(IPAMOperatorV4CIDR)
+	c.IPAMOperatorV6CIDR = viper.GetString(IPAMOperatorV6CIDR)
 	c.IPv4Range = viper.GetString(IPv4Range)
 	c.IPv4NodeAddr = viper.GetString(IPv4NodeAddr)
 	c.IPv4ServiceRange = viper.GetString(IPv4ServiceRange)
@@ -2398,6 +2436,8 @@ func (c *DaemonConfig) Populate() {
 	c.MonitorQueueSize = viper.GetInt(MonitorQueueSizeName)
 	c.MTU = viper.GetInt(MTUName)
 	c.NAT46Range = viper.GetString(NAT46Range)
+	c.NodeCIDRMaskSizeIPv4 = viper.GetInt(NodeCIDRMaskSizeIPv4)
+	c.NodeCIDRMaskSizeIPv6 = viper.GetInt(NodeCIDRMaskSizeIPv6)
 	c.NodesGCInterval = viper.GetDuration(NodesGCInterval)
 	c.FlannelMasterDevice = viper.GetString(FlannelMasterDevice)
 	c.FlannelUninstallOnExit = viper.GetBool(FlannelUninstallOnExit)
