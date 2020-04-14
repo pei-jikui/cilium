@@ -15,6 +15,7 @@
 package cidr
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"net"
@@ -54,6 +55,26 @@ func (n *CIDR) DeepCopy() *CIDR {
 func (n *CIDR) AvailableIPs() int {
 	ones, bits := n.Mask.Size()
 	return int(math.Pow(2.0, float64(bits-ones)))
+}
+
+// Equal returns true if the receiver's CIDR equals the other CIDR.
+func (n *CIDR) Equal(o *CIDR) bool {
+	if n == nil || o == nil {
+		return n == o
+	}
+	return Equal(n.IPNet, o.IPNet)
+}
+
+// Equal returns true if the n and o net.IPNet CIDRs arr Equal.
+func Equal(n, o *net.IPNet) bool {
+	if n == nil || o == nil {
+		return n == o
+	}
+	if n == o {
+		return true
+	}
+	return n.IP.Equal(o.IP) &&
+		bytes.Equal(n.Mask, o.Mask)
 }
 
 // ParseCIDR parses the CIDR string using net.ParseCIDR
