@@ -161,37 +161,19 @@ func runOperator(cmd *cobra.Command) {
 		nodeManager allocator.NodeEventHandler
 		err         error
 	)
-
-	switch option.Config.IPAM {
-	case option.IPAMENI:
-		ipamAllocatorAWS, providerBuiltin := allocatorProviders["aws"]
+	if ipamMode := option.Config.IPAM; ipamMode != "" {
+		alloc, providerBuiltin := allocatorProviders[ipamMode]
 		if !providerBuiltin {
-			log.WithError(err).Fatal("AWS ENI allocator is not supported by this version of cilium-operator")
+			log.Fatalf("%s allocator is not supported by this version of cilium-operator", ipamMode)
 		}
 
-		if err := ipamAllocatorAWS.Init(); err != nil {
-			log.WithError(err).Fatal("Unable to init AWS ENI allocator")
+		if err := alloc.Init(); err != nil {
+			log.WithError(err).Fatalf("Unable to init %s allocator", ipamMode)
 		}
 
-		nodeManager, err = ipamAllocatorAWS.Start(&ciliumNodeUpdateImplementation{})
+		nodeManager, err = alloc.Start(&ciliumNodeUpdateImplementation{})
 		if err != nil {
-			log.WithError(err).Fatal("Unable to start AWS ENI allocator")
-		}
-
-		startSynchronizingCiliumNodes(nodeManager)
-	case option.IPAMAzure:
-		ipamAllocatorAzure, providerBuiltin := allocatorProviders["azure"]
-		if !providerBuiltin {
-			log.WithError(err).Fatal("Azure allocator is not supported by this version of cilium-operator")
-		}
-
-		if err := ipamAllocatorAzure.Init(); err != nil {
-			log.WithError(err).Fatal("Unable to init Azure allocator")
-		}
-
-		nodeManager, err = ipamAllocatorAzure.Start(&ciliumNodeUpdateImplementation{})
-		if err != nil {
-			log.WithError(err).Fatal("Unable to start Azure allocator")
+			log.WithError(err).Fatalf("Unable to start %s allocator", ipamMode)
 		}
 
 		startSynchronizingCiliumNodes(nodeManager)
