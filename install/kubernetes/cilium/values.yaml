@@ -435,3 +435,11 @@ global:
     # See https://github.com/cilium/hubble/blob/master/Documentation/metrics.md for more comprehensive
     # documentation about Hubble's metric collection.
     metrics: []
+
+  ipam:
+    mode: "operator"
+    operator:
+      ipv4PodCIDR: "10.0.0.0/16"
+      nodeCIDRMaskSizeIPv4: 24
+      ipv6PodCIDR: "fd00::/96"
+      nodeCIDRMaskSizeIPv6: 112
