@@ -1797,11 +1797,11 @@ type DaemonConfig struct {
 
 	// IPAMOperatorV4CIDR is the cluster IPv4 podCIDR that should be used to
 	// allocate pods in the node.
-	IPAMOperatorV4CIDR string
+	IPAMOperatorV4CIDR []string
 
 	// IPAMOperatorV6CIDR is the cluster IPv6 podCIDR that should be used to
 	// allocate pods in the node.
-	IPAMOperatorV6CIDR string
+	IPAMOperatorV6CIDR []string
 
 	// NodeCIDRMaskSizeIPv4 is the IPv4 podCIDR mask size that will be used
 	// per node.
@@ -2390,8 +2390,8 @@ func (c *DaemonConfig) Populate() {
 	c.IdentityChangeGracePeriod = viper.GetDuration(IdentityChangeGracePeriod)
 	c.IdentityGCInterval = viper.GetDuration(IdentityGCInterval)
 	c.IPAM = viper.GetString(IPAM)
-	c.IPAMOperatorV4CIDR = viper.GetString(IPAMOperatorV4CIDR)
-	c.IPAMOperatorV6CIDR = viper.GetString(IPAMOperatorV6CIDR)
+	c.IPAMOperatorV4CIDR = viper.GetStringSlice(IPAMOperatorV4CIDR)
+	c.IPAMOperatorV6CIDR = viper.GetStringSlice(IPAMOperatorV6CIDR)
 	c.IPv4Range = viper.GetString(IPv4Range)
 	c.IPv4NodeAddr = viper.GetString(IPv4NodeAddr)
 	c.IPv4ServiceRange = viper.GetString(IPv4ServiceRange)

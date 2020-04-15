@@ -179,7 +179,8 @@ func runOperator(cmd *cobra.Command) {
 		startSynchronizingCiliumNodes(nodeManager)
 
 		if ipamMode == option.IPAMOperator {
-			// Wait until the cilium nodes are fetched.
+			// Wait until the cilium nodes are fetched because we don't want
+			// to overwrite podCIDR allocations of nodes allocattesd by
 			<-k8sCiliumNodesCacheSynced
 
 			// Run this in a go routine because we will need to watch

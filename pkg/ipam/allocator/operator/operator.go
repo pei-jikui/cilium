@@ -15,10 +15,9 @@
 package operator
 
 import (
+	"errors"
 	"fmt"
 	"net"
-
-	"github.com/cilium/ipam/cidrset"
 
 	operatorMetrics "github.com/cilium/cilium/operator/metrics"
 	ipPkg "github.com/cilium/cilium/pkg/ip"
@@ -29,22 +28,49 @@ import (
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/trigger"
+
+	"github.com/cilium/ipam/cidrset"
 )
 
 var log = logging.DefaultLogger.WithField(logfields.LogSubsys, "ipam-allocator-operator")
 
-// AllocatorOperator is an implementation of IPAM allocator interface for AWS ENI
-type AllocatorOperator struct{}
+// AllocatorOperator is an implementation of IPAM allocator interface for Cilium IPAM
+type AllocatorOperator struct {
+	v4CIDRSet, v6CIDRSet []ipam.CIDRAllocator
+}
 
-// Init sets up ENI limits based on given options
-func (*AllocatorOperator) Init() error {
+// Init sets up Cilium allocator based on given options
+func (a *AllocatorOperator) Init() error {
+	if len(option.Config.IPAMOperatorV4CIDR) != 0 {
+		if !option.Config.EnableIPv4 {
+			return errors.New("IPv4CIDR can not be set if IPv4 is not enabled")
+		}
+		v4Allocators, err := newCIDRSets(false, option.Config.IPAMOperatorV4CIDR, option.Config.NodeCIDRMaskSizeIPv4)
+		if err != nil {
+			return fmt.Errorf("unable to initialize IPv4 allocator %w", err)
+		}
+		a.v4CIDRSet = v4Allocators
+	}
+	if len(option.Config.IPAMOperatorV6CIDR) != 0 {
+		if !option.Config.EnableIPv6 {
+			return errors.New("IPv6CIDR can not be set if IPv6 is not enabled")
+		}
+		v6Allocators, err := newCIDRSets(true, option.Config.IPAMOperatorV6CIDR, option.Config.NodeCIDRMaskSizeIPv6)
+		if err != nil {
+			return fmt.Errorf("unable to initialize IPv6 allocator %w", err)
+		}
+		a.v6CIDRSet = v6Allocators
+	}
+	if len(a.v4CIDRSet)+len(a.v6CIDRSet) == 0 {
+		return fmt.Errorf("either '%s' or '%s' need to be set", option.IPAMOperatorV4CIDR, option.IPAMOperatorV6CIDR)
+	}
 	return nil
 }
 
 // Start kicks of ENI allocation, the initial connection to AWS
 // APIs is done in a blocking manner, given that is successful, a controller is
 // started to manage allocation based on CiliumNode custom resources
-func (*AllocatorOperator) Start(getterUpdater ipam.CiliumNodeGetterUpdater) (allocator.NodeEventHandler, error) {
+func (a *AllocatorOperator) Start(getterUpdater ipam.CiliumNodeGetterUpdater) (allocator.NodeEventHandler, error) {
 	log.Info("Starting Operator IP allocator...")
 
 	var (
@@ -57,42 +83,51 @@ func (*AllocatorOperator) Start(getterUpdater ipam.CiliumNodeGetterUpdater) (all
 		iMetrics = &ipamMetrics.NoOpMetricsObserver{}
 	}
 
-	var v4CIDRSet, v6CIDRSet *cidrset.CidrSet
-	if len(option.Config.IPAMOperatorV4CIDR) != 0 {
-		v4Addr, v4CIDR, err := net.ParseCIDR(option.Config.IPAMOperatorV4CIDR)
-		if err != nil {
-			return nil, err
-		}
-		if !ipPkg.IsIPv4(v4Addr) {
-			return nil, fmt.Errorf("IPv4CIDR is not v4 family: %s", v4Addr)
-		}
-		if !option.Config.EnableIPv4 {
-			return nil, fmt.Errorf("IPv4CIDR can not be set if IPv4 is not enabled")
-		}
-		v4CIDRSet, err = cidrset.NewCIDRSet(v4CIDR, option.Config.NodeCIDRMaskSizeIPv4)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create IPv4 pod CIDR: %s", err)
-		}
-
-	}
-	if len(option.Config.IPAMOperatorV6CIDR) != 0 {
-		v6Addr, v6CIDR, err := net.ParseCIDR(option.Config.IPAMOperatorV6CIDR)
-		if err != nil {
-			return nil, err
-		}
-		if ipPkg.IsIPv4(v6Addr) {
-			return nil, fmt.Errorf("IPv6CIDR is not v6 family: %s", v6Addr)
-		}
-		if !option.Config.EnableIPv6 {
-			return nil, fmt.Errorf("IPv4CIDR can not be set if IPv4 is not enabled")
-		}
-		v6CIDRSet, err = cidrset.NewCIDRSet(v6CIDR, option.Config.NodeCIDRMaskSizeIPv6)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create IPv6 pod CIDR: %s", err)
-		}
-	}
-
-	nodeManager := ipam.NewNodesPodCIDRManager(v4CIDRSet, v6CIDRSet, getterUpdater, iMetrics)
+	nodeManager := ipam.NewNodesPodCIDRManager(a.v4CIDRSet, a.v6CIDRSet, getterUpdater, iMetrics)
 
 	return nodeManager, nil
+}
+
+func newCIDRSets(isV6 bool, strCIDRs []string, maskSize int) ([]ipam.CIDRAllocator, error) {
+	cidrAllocators := make([]ipam.CIDRAllocator, 0, len(strCIDRs))
+	for _, strCIDR := range strCIDRs {
+		cidrSet, err := newCIDRSet(isV6, strCIDR, maskSize)
+		if err != nil {
+			return nil, err
+		}
+		cidrAllocators = append(cidrAllocators, cidrSet)
+	}
+	return cidrAllocators, nil
+}
+
+func newCIDRSet(isV6 bool, strCIDR string, maskSize int) (ipam.CIDRAllocator, error) {
+	addr, cidr, err := net.ParseCIDR(strCIDR)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case isV6 && ipPkg.IsIPv4(addr):
+		return nil, fmt.Errorf("CIDR is not v6 family: %s", cidr)
+	case !isV6 && !ipPkg.IsIPv4(addr):
+		return nil, fmt.Errorf("CIDR is not v4 family: %s", cidr)
+	}
+
+	cidrSet, err := cidrset.NewCIDRSet(cidr, maskSize)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create IPv6 pod CIDR: %s", err)
+	}
+
+	return &cidrWrapper{
+		v6:      isV6,
+		CidrSet: cidrSet,
+	}, nil
+}
+
+type cidrWrapper struct {
+	*cidrset.CidrSet
+	v6 bool
+}
+
+func (a *cidrWrapper) IsIPv6() bool {
+	return a.v6
 }

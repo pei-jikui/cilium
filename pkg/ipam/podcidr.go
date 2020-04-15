@@ -16,6 +16,7 @@ package ipam
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -42,7 +43,7 @@ const (
 // ErrAllocatorNotFound is an error that should be used in case the node tries
 // to allocate a CIDR for an allocator that does not exist.
 type ErrAllocatorNotFound struct {
-	cidr          *net.IPNet
+	cidr          []*net.IPNet
 	allocatorType allocatorType
 }
 
@@ -51,16 +52,13 @@ func (e *ErrAllocatorNotFound) Error() string {
 	return fmt.Sprintf("unable to allocate CIDR %s since allocator for %s addresses does not exist", e.cidr, e.allocatorType)
 }
 
-// ErrConflictIPNet is an error that should be used when 2 CIDRs colide when
-// the node has 2 or more podCIDRs for the same IP family.
-type ErrConflictIPNet struct {
-	newIPNet      *net.IPNet
-	existingIPNet *net.IPNet
+// ErrAllocatorFull ...
+type ErrAllocatorFull struct {
 }
 
-// Error returns the human-readable error for the ErrConflictIPNet
-func (e *ErrConflictIPNet) Error() string {
-	return fmt.Sprintf("IPNet %s conflicts with %s as they are from the same IP family type", e.newIPNet, e.existingIPNet)
+// Error returns the human-readable error for the ErrAllocatorFull
+func (e *ErrAllocatorFull) Error() string {
+	return fmt.Sprintf("allocator full")
 }
 
 // ErrCIDRAllocated is an error that should be used when the requested CIDR
@@ -75,38 +73,26 @@ func (e *ErrCIDRAllocated) Error() string {
 }
 
 // parsePodCIDRs will return the v4 and v6 CIDRs found in the podCIDRs.
-// Returns an error in case multiple CIDRs exist for the same IP family.
-func parsePodCIDRs(podCIDRs []string) (*net.IPNet, *net.IPNet, error) {
-	var v4IPNet, v6IPNet *net.IPNet
+// Returns an error in case one of the CIDRs are not valid.
+func parsePodCIDRs(podCIDRs []string) (*nodeCIDRs, error) {
+	var cidrs nodeCIDRs
 	for _, podCIDR := range podCIDRs {
 		ip, ipNet, err := net.ParseCIDR(podCIDR)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if ipPkg.IsIPv4(ip) {
-			if v4IPNet != nil {
-				return nil, nil, &ErrConflictIPNet{
-					newIPNet:      ipNet,
-					existingIPNet: v4IPNet,
-				}
-			}
-			v4IPNet = ipNet
+			cidrs.v4PodCIDR = append(cidrs.v4PodCIDR, ipNet)
 		} else {
-			if v6IPNet != nil {
-				return nil, nil, &ErrConflictIPNet{
-					newIPNet:      ipNet,
-					existingIPNet: v6IPNet,
-				}
-			}
-			v6IPNet = ipNet
+			cidrs.v6PodCIDR = append(cidrs.v6PodCIDR, ipNet)
 		}
 	}
-	return v4IPNet, v6IPNet, nil
+	return &cidrs, nil
 }
 
 // nodeCIDRs is a wrapper that contains all the podCIDRs a node can have.
 type nodeCIDRs struct {
-	v4PodCIDR, v6PodCIDR *net.IPNet
+	v4PodCIDR, v6PodCIDR []*net.IPNet
 }
 
 type k8sOp int
@@ -137,10 +123,10 @@ type NodesPodCIDRManager struct {
 
 	// Lock protects all fields below
 	lock.Mutex
-	// v4PodCIDR contains the CIDRs for IPv4 addresses
-	v4ClusterCIDR CIDRAllocator
-	// v4PodCIDR contains the CIDRs for IPv6 addresses
-	v6ClusterCIDR CIDRAllocator
+	// v4ClusterCIDRs contains the CIDRs for IPv4 addresses
+	v4ClusterCIDRs []CIDRAllocator
+	// v6ClusterCIDRs contains the CIDRs for IPv6 addresses
+	v6ClusterCIDRs []CIDRAllocator
 	// nodes maps a node name to the CIDRs allocated for that node
 	nodes map[string]*nodeCIDRs
 	// maps a node name to the operation that needs to be performed in
@@ -153,16 +139,18 @@ type CIDRAllocator interface {
 	AllocateNext() (*net.IPNet, error)
 	Release(cidr *net.IPNet) error
 	IsAllocated(cidr *net.IPNet) (bool, error)
+	IsIPv6() bool
+	IsFree() bool
 }
 
 // NewNodesPodCIDRManager will create a node podCIDR manager.
-// Both v4CIDR and v6CIDR can be nil, but not at the same time.
+// Both v4Allocators and v6Allocators can be nil, but not at the same time.
 // nodeGetter will be used to populate synced node status / spec with
 // kubernetes.
-func NewNodesPodCIDRManager(v4CIDR, v6CIDR CIDRAllocator, nodeGetter CiliumNodeGetterUpdater, triggerMetrics trigger.MetricsObserver) *NodesPodCIDRManager {
+func NewNodesPodCIDRManager(v4Allocators, v6Allocators []CIDRAllocator, nodeGetter CiliumNodeGetterUpdater, triggerMetrics trigger.MetricsObserver) *NodesPodCIDRManager {
 	n := &NodesPodCIDRManager{
-		v4ClusterCIDR:       v4CIDR,
-		v6ClusterCIDR:       v6CIDR,
+		v4ClusterCIDRs:      v4Allocators,
+		v6ClusterCIDRs:      v6Allocators,
 		nodes:               map[string]*nodeCIDRs{},
 		ciliumNodesToK8s:    map[string]*ciliumNodeK8sOp{},
 		k8sReSyncController: controller.NewManager(),
@@ -246,8 +234,8 @@ func syncToK8s(nodeGetter CiliumNodeGetterUpdater, ciliumNodesToK8s map[string]*
 				err = nil
 			case k8sErrors.IsConflict(err):
 				// the err in the line below is not being shadowed accidentally
-				// we caller of this function should not care about the
-				// these errors.
+				// the caller of this function should not care about conflict
+				// errors.
 				newCiliumNode, err := nodeGetter.Get(nodeToK8s.ciliumNode.GetName())
 				if err == nil {
 					newCiliumNode.Spec.IPAM.PodCIDRs = nodeToK8s.ciliumNode.Spec.IPAM.PodCIDRs
@@ -269,8 +257,8 @@ func syncToK8s(nodeGetter CiliumNodeGetterUpdater, ciliumNodesToK8s map[string]*
 				err = nil
 			case k8sErrors.IsConflict(err):
 				// the err in the line below is not being shadowed accidentally
-				// we caller of this function should not care about the
-				// these errors.
+				// the caller of this function should not care about conflict
+				// errors.
 				newCiliumNode, err := nodeGetter.Get(nodeToK8s.ciliumNode.GetName())
 				if err == nil {
 					newCiliumNode.Spec.IPAM.PodCIDRs = nodeToK8s.ciliumNode.Spec.IPAM.PodCIDRs
@@ -299,28 +287,32 @@ func syncToK8s(nodeGetter CiliumNodeGetterUpdater, ciliumNodesToK8s map[string]*
 
 // Create will re-allocate the node podCIDRs. In case the node already has
 // podCIDRs allocated, the podCIDR allocator will try to allocate those CIDRs.
-// In case the CIDRs were able to be allocated the CiliumNode will have its
+// In case the CIDRs were able to be allocated, the CiliumNode will have its
 // podCIDRs fields set with the allocated CIDRs.
-// In case the CIDRs were unable to be allocated this function will return
+// In case the CIDRs were unable to be allocated, this function will return
 // false and the node will have its status updated into kubernetes with the
-// error message.
+// error message by the NodesPodCIDRManager.
 func (n *NodesPodCIDRManager) Create(node *v2.CiliumNode) bool {
-	cn, updateStatus, err := n.AllocateNode(node)
+	cn, allocated, err := n.AllocateNode(node)
 	if err != nil {
 		return false
 	}
-	if updateStatus {
-		// the n.syncNode will never fail because it's only adding elements to a map.
-		// This will later on sync the node into k8s by the controller defined
-		// NodesPodCIDRManager's controller, which keeps retrying to create the
-		// node in k8s until it succeeds.
+	// if allocated is false it means that we were unable to allocate
+	// a CIDR so we need to update the status of the node into k8s.
+	if !allocated && cn != nil {
+		// the n.syncNode will never fail because it's only adding elements to a
+		// map.
+		// NodesPodCIDRManager will later on sync the node into k8s by the
+		// controller defined, which keeps retrying to create the node in k8s
+		// until it succeeds.
 
 		// If the resource version is != "" it means the object already exists
 		// in kubernetes so we should perform an update status instead of a create.
 		if cn.GetResourceVersion() != "" {
 			n.syncNode(k8sOpUpdateStatus, cn)
+		} else {
+			n.syncNode(k8sOpCreate, cn)
 		}
-		n.syncNode(k8sOpCreate, cn)
 		return false
 	}
 	if cn == nil {
@@ -331,9 +323,9 @@ func (n *NodesPodCIDRManager) Create(node *v2.CiliumNode) bool {
 	// in kubernetes so we should perform an update instead of a create.
 	if cn.GetResourceVersion() != "" {
 		n.syncNode(k8sOpUpdate, cn)
-		return true
+	} else {
+		n.syncNode(k8sOpCreate, cn)
 	}
-	n.syncNode(k8sOpCreate, cn)
 	return true
 }
 
@@ -345,11 +337,13 @@ func (n *NodesPodCIDRManager) Create(node *v2.CiliumNode) bool {
 // false and the node will have its status updated into kubernetes with the
 // error message.
 func (n *NodesPodCIDRManager) Update(node *v2.CiliumNode) bool {
-	cn, updateStatus, err := n.AllocateNode(node)
+	cn, allocated, err := n.AllocateNode(node)
 	if err != nil {
 		return false
 	}
-	if updateStatus {
+	// if allocated is false it means that we were unable to allocate
+	// a CIDR so we need to update the status of the node into k8s.
+	if !allocated && cn != nil {
 		// the n.syncNode will never fail because it's only adding elements to a map.
 		// This will later on sync the node into k8s by the controller defined
 		// NodesPodCIDRManager's controller, which keeps retrying to update the
@@ -392,14 +386,15 @@ func (n *NodesPodCIDRManager) Resync(context.Context, time.Time) {
 }
 
 // AllocateNode allocates the podCIDRs for the given node. Returns a DeepCopied
-// node with the podCIDRs allocated. In case there wasn't CIDRs allocated
+// node with the podCIDRs allocated. In case there weren't CIDRs allocated
 // the returned node will be nil.
-// If updateStatus returns true, it means an update of CiliumNode Status should
-// be performed into kubernetes.
-func (n *NodesPodCIDRManager) AllocateNode(node *v2.CiliumNode) (cn *v2.CiliumNode, updateStatus bool, err error) {
+// If allocated returns false, it means an update of CiliumNode Status should
+// be performed into kubernetes as an error have happened while trying to
+// allocate a CIDR for this node.
+func (n *NodesPodCIDRManager) AllocateNode(node *v2.CiliumNode) (cn *v2.CiliumNode, allocated bool, err error) {
 	var (
-		v4CIDR, v6CIDR *net.IPNet
-		allocated      bool
+		cidrs        *nodeCIDRs
+		updateStatus bool
 	)
 
 	defer func() {
@@ -409,6 +404,7 @@ func (n *NodesPodCIDRManager) AllocateNode(node *v2.CiliumNode) (cn *v2.CiliumNo
 			cn = node.DeepCopy()
 			cn.Status.IPAM.OperatorStatus.Error = err.Error()
 			err = nil
+			allocated = false
 		}
 	}()
 
@@ -416,14 +412,14 @@ func (n *NodesPodCIDRManager) AllocateNode(node *v2.CiliumNode) (cn *v2.CiliumNo
 		n.Mutex.Lock()
 		defer n.Mutex.Unlock()
 		// Allocate the next free CIDRs
-		v4CIDR, v6CIDR, _, err = n.allocateNext(node.GetName())
+		cidrs, _, err = n.allocateNext(node.GetName())
 		if err != nil {
 			// We want to log this error in cilium node
 			updateStatus = true
 			return
 		}
 	} else {
-		v4CIDR, v6CIDR, err = parsePodCIDRs(node.Spec.IPAM.PodCIDRs)
+		cidrs, err = parsePodCIDRs(node.Spec.IPAM.PodCIDRs)
 		if err != nil {
 			// We want to log this error in cilium node
 			updateStatus = true
@@ -434,7 +430,7 @@ func (n *NodesPodCIDRManager) AllocateNode(node *v2.CiliumNode) (cn *v2.CiliumNo
 		// Try to allocate the podCIDRs in the node, if there was a need
 		// for new CIDRs to be allocated the allocated returned value will be
 		// set to true.
-		allocated, err = n.allocateIPNets(node.Name, v4CIDR, v6CIDR)
+		allocated, err = n.allocateIPNets(node.Name, cidrs.v4PodCIDR, cidrs.v6PodCIDR)
 		if err != nil {
 			// We want to log this error in cilium node
 			updateStatus = true
@@ -448,11 +444,15 @@ func (n *NodesPodCIDRManager) AllocateNode(node *v2.CiliumNode) (cn *v2.CiliumNo
 
 	cn = node.DeepCopy()
 
-	if v4CIDR != nil {
-		cn.Spec.IPAM.PodCIDRs = append(cn.Spec.IPAM.PodCIDRs, v4CIDR.String())
+	if cidrs.v4PodCIDR != nil {
+		for _, v4CIDR := range cidrs.v4PodCIDR {
+			cn.Spec.IPAM.PodCIDRs = append(cn.Spec.IPAM.PodCIDRs, v4CIDR.String())
+		}
 	}
-	if v6CIDR != nil {
-		cn.Spec.IPAM.PodCIDRs = append(cn.Spec.IPAM.PodCIDRs, v6CIDR.String())
+	if cidrs.v6PodCIDR != nil {
+		for _, v6CIDR := range cidrs.v6PodCIDR {
+			cn.Spec.IPAM.PodCIDRs = append(cn.Spec.IPAM.PodCIDRs, v6CIDR.String())
+		}
 	}
 	return cn, false, nil
 }
@@ -470,18 +470,26 @@ func (n *NodesPodCIDRManager) syncNode(op k8sOp, ciliumNode *v2.CiliumNode) {
 // releaseIPNets release the CIDRs allocated for this node.
 // Returns true if the node was found in the allocator, false otherwise.
 func (n *NodesPodCIDRManager) releaseIPNets(nodeName string) bool {
-	ipNets, ok := n.nodes[nodeName]
+	cidrs, ok := n.nodes[nodeName]
 	if !ok {
 		return false
 	}
 
 	delete(n.nodes, nodeName)
 
-	if ipNets.v4PodCIDR != nil && !reflect.ValueOf(n.v4ClusterCIDR).IsNil() {
-		n.v4ClusterCIDR.Release(ipNets.v4PodCIDR)
+	if len(cidrs.v4PodCIDR) != 0 && len(n.v4ClusterCIDRs) != 0 {
+		for _, ipNet := range cidrs.v4PodCIDR {
+			for _, v4ClusterCIDR := range n.v4ClusterCIDRs {
+				v4ClusterCIDR.Release(ipNet)
+			}
+		}
 	}
-	if ipNets.v6PodCIDR != nil && !reflect.ValueOf(n.v6ClusterCIDR).IsNil() {
-		n.v6ClusterCIDR.Release(ipNets.v6PodCIDR)
+	if len(cidrs.v6PodCIDR) != 0 && len(n.v6ClusterCIDRs) != 0 {
+		for _, ipNet := range cidrs.v6PodCIDR {
+			for _, v6ClusterCIDR := range n.v6ClusterCIDRs {
+				v6ClusterCIDR.Release(ipNet)
+			}
+		}
 	}
 	return true
 }
@@ -492,18 +500,19 @@ func (n *NodesPodCIDRManager) releaseIPNets(nodeName string) bool {
 // The return value 'allocated' is set to false in case none of the CIDRs were
 // re-allocated.
 // In case an error is returned no CIDRs were allocated nor released.
-func (n *NodesPodCIDRManager) allocateIPNets(nodeName string, v4CIDR, v6CIDR *net.IPNet) (allocated bool, err error) {
+func (n *NodesPodCIDRManager) allocateIPNets(nodeName string, v4CIDR, v6CIDR []*net.IPNet) (allocated bool, err error) {
 	// If this node had already allocated CIDRs then release the previous
 	// allocated CIDRs and return new ones.
 	var keepV4CIDR, keepV6CIDR bool
 	oldNodeCIDRs, nodeHasCIDRs := n.nodes[nodeName]
 	if nodeHasCIDRs {
-		// If the requested CIDRs are the same as already previously allocated
-		// for this node then don't do any operation.
-		keepV4CIDR = cidr.Equal(oldNodeCIDRs.v4PodCIDR, v4CIDR)
-		keepV6CIDR = cidr.Equal(oldNodeCIDRs.v6PodCIDR, v6CIDR)
+		keepV4CIDR = cidr.ContainsAll(oldNodeCIDRs.v4PodCIDR, v4CIDR)
+		keepV6CIDR = cidr.ContainsAll(oldNodeCIDRs.v6PodCIDR, v6CIDR)
 		if keepV4CIDR && keepV6CIDR {
 			return
+		} else{
+			// We don't support changing podCIDRs of already allocated nodes.
+			return false, errors.New("Operation not supported!")
 		}
 	}
 
@@ -521,9 +530,9 @@ func (n *NodesPodCIDRManager) allocateIPNets(nodeName string, v4CIDR, v6CIDR *ne
 
 	if !keepV4CIDR {
 		if nodeHasCIDRs {
-			revertFunc, err = allocateIPNet(v4AllocatorType, n.v4ClusterCIDR, oldNodeCIDRs.v4PodCIDR, v4CIDR)
+			revertFunc, err = allocateIPNet(v4AllocatorType, n.v4ClusterCIDRs, oldNodeCIDRs.v4PodCIDR, v4CIDR)
 		} else {
-			revertFunc, err = allocateIPNet(v4AllocatorType, n.v4ClusterCIDR, nil, v4CIDR)
+			revertFunc, err = allocateIPNet(v4AllocatorType, n.v4ClusterCIDRs, nil, v4CIDR)
 		}
 		if err != nil {
 			return
@@ -532,9 +541,9 @@ func (n *NodesPodCIDRManager) allocateIPNets(nodeName string, v4CIDR, v6CIDR *ne
 	}
 	if !keepV6CIDR {
 		if nodeHasCIDRs {
-			revertFunc, err = allocateIPNet(v6AllocatorType, n.v6ClusterCIDR, oldNodeCIDRs.v6PodCIDR, v6CIDR)
+			revertFunc, err = allocateIPNet(v6AllocatorType, n.v6ClusterCIDRs, oldNodeCIDRs.v6PodCIDR, v6CIDR)
 		} else {
-			revertFunc, err = allocateIPNet(v6AllocatorType, n.v6ClusterCIDR, nil, v6CIDR)
+			revertFunc, err = allocateIPNet(v6AllocatorType, n.v6ClusterCIDRs, nil, v6CIDR)
 		}
 		if err != nil {
 			return
@@ -553,16 +562,16 @@ func (n *NodesPodCIDRManager) allocateIPNets(nodeName string, v4CIDR, v6CIDR *ne
 }
 
 // allocateIPNet allocates the `newCidr` in the cidrSet allocator. If the
-// the `newCIDR` is already allocated and error is returned.
+// the `newCIDR` is already allocated an error is returned.
 // In case the function returns successfully, it's up to the caller to execute
 // the revert function provided to revert all state made. If the function
 // returns an error the caller of this function can assume no state was
-// modified.
-func allocateIPNet(allType allocatorType, cidrSet CIDRAllocator, oldCidr, newCidr *net.IPNet) (revertFunc revert.RevertFunc, err error) {
+// modified to the given cidrSets.
+func allocateIPNet(allType allocatorType, cidrSets []CIDRAllocator, oldCidrs, newCidrs []*net.IPNet) (revertFunc revert.RevertFunc, err error) {
 	// If the node does not need a new CIDR then this will be a no-op
 	// which means the node might keep the old CIDR previously allocated,
 	// if any.
-	if newCidr == nil {
+	if newCidrs == nil {
 		return
 	}
 
@@ -574,48 +583,77 @@ func allocateIPNet(allType allocatorType, cidrSet CIDRAllocator, oldCidr, newCid
 		}
 	}()
 
-	if reflect.ValueOf(cidrSet).IsNil() {
+	if len(cidrSets) == 0 {
 		// Return an error if the node tries to allocate a CIDR and
 		// we don't have a CIDR set for this CIDR type.
 		return nil, &ErrAllocatorNotFound{
-			cidr:          newCidr,
+			cidr:          newCidrs,
 			allocatorType: allType,
 		}
 	}
 
-	if oldCidr != nil {
-		// Release the old CIDR
-		err = cidrSet.Release(oldCidr)
-		if err != nil {
-			return
+	if oldCidrs != nil {
+		// Release the old CIDRs
+		for _, cidrSet := range cidrSets {
+			var isAllocated bool
+			for _, oldCIDR := range oldCidrs {
+				isAllocated, err = cidrSet.IsAllocated(oldCIDR)
+				if err != nil {
+					// If an error is returned we can assume it is because
+					// the oldCIDR does not belong to the given cidrSet
+					continue
+				}
+				if isAllocated {
+					err = cidrSet.Release(oldCIDR)
+					if err != nil {
+						return
+					}
+					revertStack.Push(func() error {
+						// In case of an error re-occupy the old cidr
+						return cidrSet.Occupy(oldCIDR)
+					})
+					break
+				}
+			}
 		}
-		revertStack.Push(func() error {
-			// In case of an error re-occupy the old cidr
-			return cidrSet.Occupy(oldCidr)
-		})
 	}
 	// Check if the CIDR is already allocated before allocating it.
-	var isAllocated bool
-	isAllocated, err = cidrSet.IsAllocated(newCidr)
-	if err != nil {
-		return
-	}
-	if isAllocated {
-		return nil, &ErrCIDRAllocated{
-			cidr: newCidr,
+	for _, newCIDR := range newCidrs {
+		var isAllocated, occupied bool
+		for _, cidrSet := range cidrSets {
+			isAllocated, err = cidrSet.IsAllocated(newCIDR)
+			if err != nil {
+				// Ignore this error because we need to find out which
+				// allocator can allocate this CIDR.
+				continue
+			}
+			if isAllocated {
+				return nil, &ErrCIDRAllocated{
+					cidr: newCIDR,
+				}
+			}
+			// Try to allocate this new CIDR
+			err = cidrSet.Occupy(newCIDR)
+			if err != nil {
+				// Ignore this error because we need to find out which
+				// allocator can allocate this CIDR.
+				continue
+			}
+			occupied = true
+			revertStack.Push(func() error {
+				// In case of a follow up error release this new allocated CIDR.
+				return cidrSet.Release(newCIDR)
+			})
+			break
+		}
+		// If we were unable to occupy the CIDRs on any allocators then return
+		// immediately as one of the CIDR allocators should be able to allocate
+		// this new CIDR.
+		if !occupied {
+			return
 		}
 	}
 
-	// Try to occupy allocate this new CIDR
-	err = cidrSet.Occupy(newCidr)
-	if err != nil {
-		return
-	}
-
-	revertStack.Push(func() error {
-		// In case of a follow up error release this new allocated CIDR.
-		return cidrSet.Release(newCidr)
-	})
 	return revertStack.Revert, nil
 }
 
@@ -626,50 +664,75 @@ func allocateIPNet(allType allocatorType, cidrSet CIDRAllocator, oldCidr, newCid
 // The return value 'allocated' is set to false in case none of the CIDRs were
 // re-allocated, for example in the case the node had already allocated CIDRs.
 // In case an error is returned no CIDRs were allocated.
-func (n *NodesPodCIDRManager) allocateNext(nodeName string) (v4CIDR, v6CIDR *net.IPNet, allocated bool, err error) {
+func (n *NodesPodCIDRManager) allocateNext(nodeName string) (nCIDRs *nodeCIDRs, allocated bool, err error) {
 	// If this node had already allocated CIDRs then returned the already
 	// allocated CIDRs
-	if nodeCIDRs, ok := n.nodes[nodeName]; ok {
-		v4CIDR = nodeCIDRs.v4PodCIDR
-		v6CIDR = nodeCIDRs.v6PodCIDR
+	if cidrs, ok := n.nodes[nodeName]; ok {
+		nCIDRs = cidrs
 		return
 	}
 
+	var (
+		revertStack revert.RevertStack
+		revertFunc  revert.RevertFunc
+	)
+
+	defer func() {
+		// Revert any operation made so far in case any of them failed.
+		if err != nil {
+			revertStack.Revert()
+		}
+	}()
+
+	var v4CIDR, v6CIDR *net.IPNet
+
 	// Only allocate a v4 CIDR if the v4CIDR allocator is available
-	if !reflect.ValueOf(n.v4ClusterCIDR).IsNil() {
-		v4CIDR, err = n.v4ClusterCIDR.AllocateNext()
+	if len(n.v4ClusterCIDRs) != 0 {
+		revertFunc, v4CIDR, err = allocateFirstFreeCIDR(n.v4ClusterCIDRs)
 		if err != nil {
 			return
 		}
-		defer func() {
-			// In case of an error revert the v4 allocated address
-			if err != nil {
-				n.v4ClusterCIDR.Release(v4CIDR)
-				v4CIDR = nil
-			}
-		}()
+		revertStack.Push(revertFunc)
 	}
-
-	// Only allocate a v6 CIDR if the v4CIDR allocator is available
-	if !reflect.ValueOf(n.v6ClusterCIDR).IsNil() {
-		v6CIDR, err = n.v6ClusterCIDR.AllocateNext()
+	if len(n.v6ClusterCIDRs) != 0 {
+		revertFunc, v6CIDR, err = allocateFirstFreeCIDR(n.v6ClusterCIDRs)
 		if err != nil {
 			return
 		}
-		defer func() {
-			// In case of an error revert the v6 allocated address
-			if err != nil {
-				n.v6ClusterCIDR.Release(v6CIDR)
-				v6CIDR = nil
-			}
-		}()
+		revertStack.Push(revertFunc)
 	}
 
-	n.nodes[nodeName] = &nodeCIDRs{
-		v4PodCIDR: v4CIDR,
-		v6PodCIDR: v6CIDR,
+	nCIDRs = &nodeCIDRs{
+		v4PodCIDR: []*net.IPNet{v4CIDR},
+		v6PodCIDR: []*net.IPNet{v6CIDR},
 	}
+	n.nodes[nodeName] = nCIDRs
 
-	return v4CIDR, v6CIDR, true, nil
+	return nCIDRs, true, nil
 
+}
+
+func allocateFirstFreeCIDR(cidrAllocators []CIDRAllocator) (revertFunc revert.RevertFunc, cidr *net.IPNet, err error) {
+	var (
+		firstFreeAllocator *CIDRAllocator
+		revertStack        revert.RevertStack
+	)
+	for _, cidrAllocator := range cidrAllocators {
+		// Allocate from the first allocator that still has free CIDRs
+		if cidrAllocator.IsFree() {
+			firstFreeAllocator = &cidrAllocator
+			break
+		}
+	}
+	if firstFreeAllocator == nil {
+		return nil, nil, &ErrAllocatorFull{}
+	}
+	cidr, err = (*firstFreeAllocator).AllocateNext()
+	if err != nil {
+		return nil, nil, err
+	}
+	revertStack.Push(func() error {
+		return (*firstFreeAllocator).Release(cidr)
+	})
+	return revertStack.Revert, nil, err
 }

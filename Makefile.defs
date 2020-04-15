@@ -85,7 +85,7 @@ GOBUILD = $(GOFLAGS) -ldflags '$(GOLDFLAGS)' $(EXTRA_GOBUILD_FLAGS)
 #GOBUILD += -race
 
 # Uncomment to enable deadlock detection
-#GOBUILD += -tags lockdebug
+GOBUILD += -tags operator_aws,operator_azure,ipam_provider_operator
 
 ifneq ($(LOCKDEBUG),)
     GOBUILD += -tags lockdebug

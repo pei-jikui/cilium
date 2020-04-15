@@ -77,6 +77,24 @@ func Equal(n, o *net.IPNet) bool {
 		bytes.Equal(n.Mask, o.Mask)
 }
 
+func ContainsAll(ipNets1, ipNets2 []*net.IPNet) bool {
+	for _, n := range ipNets2 {
+		if !Contains(ipNets1, n) {
+			return false
+		}
+	}
+	return true
+}
+
+func Contains(ipNets []*net.IPNet, ipNet *net.IPNet) bool {
+	for _, n := range ipNets {
+		if Equal(n, ipNet) {
+			return true
+		}
+	}
+	return false
+}
+
 // ParseCIDR parses the CIDR string using net.ParseCIDR
 func ParseCIDR(str string) (*CIDR, error) {
 	_, ipnet, err := net.ParseCIDR(str)
