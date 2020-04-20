@@ -515,6 +515,9 @@ func init() {
 	flags.String(option.NodePortAcceleration, option.NodePortAccelerationNone, "BPF NodePort acceleration via XDP (\"native\", \"none\")")
 	option.BindEnv(option.NodePortAcceleration)
 
+	flags.Bool(option.EnableHostFirewall, false, "Enable host network policies (default deny)")
+	option.BindEnv(option.EnableHostFirewall)
+
 	flags.String(option.LibDir, defaults.LibraryPath, "Directory path to store runtime build environment")
 	option.BindEnv(option.LibDir)
 
@@ -1071,6 +1074,18 @@ func initEnv(cmd *cobra.Command) {
 	}
 
 	initKubeProxyReplacementOptions()
+
+	if option.Config.EnableHostFirewall && option.Config.Device == "undefined" {
+		device, err := linuxdatapath.NodeDeviceNameWithDefaultRoute()
+		if err != nil {
+			msg := "Host firewall's external facing device could not be determined. Use --device to specify."
+			log.WithError(err).Fatal(msg)
+		} else {
+			log.WithField(logfields.Interface, device).
+				Info("Using auto-derived device for host firewall")
+			option.Config.Device = device
+		}
+	}
 
 	// If device has been specified, use it to derive better default
 	// allocation prefixes
