@@ -274,6 +274,16 @@ func EqualV1Node(node1, node2 *types.Node) bool {
 	return true
 }
 
+func EqualV1NodeByLabels(node1, node2 *types.Node) bool {
+	if node1.GetObjectMeta().GetName() != node2.GetObjectMeta().GetName() {
+		return false
+	}
+
+	oldNodeLabels := node1.GetLabels()
+	newNodeLabels := node2.GetLabels()
+	return comparator.MapStringEquals(oldNodeLabels, newNodeLabels)
+}
+
 func EqualV1Namespace(ns1, ns2 *types.Namespace) bool {
 	// we only care about namespace labels.
 	return ns1.Name == ns2.Name &&
