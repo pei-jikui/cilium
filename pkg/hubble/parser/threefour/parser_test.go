@@ -438,6 +438,70 @@ func TestDecodeLocalIdentity(t *testing.T) {
 	assert.Equal(t, []string{"cidr:1.2.3.4/12", "some=label"}, f.GetDestination().GetLabels())
 }
 
+func TestDecodeTrafficDirection(t *testing.T) {
+	parser, err := New(nil, nil, nil, nil, nil)
+	require.NoError(t, err)
+	parseTrafficDirection := func(event interface{}) pb.TrafficDirection {
+		data, err := testutils.CreateL3L4Payload(event)
+		require.NoError(t, err)
+		f := &pb.Flow{}
+		err = parser.Decode(&pb.Payload{Data: data}, f)
+		require.NoError(t, err)
+		return f.GetTrafficDirection()
+	}
+
+	// TRACE_FROM_LXC
+	tn := monitor.TraceNotifyV0{
+		Type:     byte(api.MessageTypeTrace),
+		ObsPoint: api.TraceFromLxc,
+	}
+	assert.Equal(t, pb.TrafficDirection_TRAFFIC_DIRECTION_UNKNOWN, parseTrafficDirection(tn))
+
+	// TRACE_TO_LXC
+	tn = monitor.TraceNotifyV0{
+		Type:     byte(api.MessageTypeTrace),
+		ObsPoint: api.TraceToLxc,
+	}
+	assert.Equal(t, pb.TrafficDirection_INGRESS, parseTrafficDirection(tn))
+
+	// TRACE_TO_LXC with CT_REPLY
+	tn = monitor.TraceNotifyV0{
+		Type:     byte(api.MessageTypeTrace),
+		ObsPoint: api.TraceToLxc,
+		Reason:   monitor.TraceReasonCtReply,
+	}
+	assert.Equal(t, pb.TrafficDirection_EGRESS, parseTrafficDirection(tn))
+
+	// TRACE_TO_HOST
+	tn = monitor.TraceNotifyV0{
+		Type:     byte(api.MessageTypeTrace),
+		ObsPoint: api.TraceToHost,
+	}
+	assert.Equal(t, pb.TrafficDirection_EGRESS, parseTrafficDirection(tn))
+
+	// TRACE_TO_HOST with CT_REPLY
+	tn = monitor.TraceNotifyV0{
+		Type:     byte(api.MessageTypeTrace),
+		ObsPoint: api.TraceToHost,
+		Reason:   monitor.TraceReasonCtReply,
+	}
+	assert.Equal(t, pb.TrafficDirection_INGRESS, parseTrafficDirection(tn))
+
+	// PolicyVerdictNotify Ingress
+	pvn := monitor.PolicyVerdictNotify{
+		Type:  byte(api.MessageTypePolicyVerdict),
+		Flags: api.PolicyIngress,
+	}
+	assert.Equal(t, pb.TrafficDirection_INGRESS, parseTrafficDirection(pvn))
+
+	// PolicyVerdictNotify Egress
+	pvn = monitor.PolicyVerdictNotify{
+		Type:  byte(api.MessageTypePolicyVerdict),
+		Flags: api.PolicyEgress,
+	}
+	assert.Equal(t, pb.TrafficDirection_EGRESS, parseTrafficDirection(pvn))
+}
+
 func Test_filterCidrLabels(t *testing.T) {
 	type args struct {
 		labels []string

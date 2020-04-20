@@ -172,7 +172,7 @@ func (p *Parser) Decode(payload *pb.Payload, decoded *pb.Flow) error {
 	decoded.DestinationNames = p.resolveNames(srcEndpoint.ID, dstIP)
 	decoded.L7 = nil
 	decoded.Reply = decodeIsReply(tn)
-	decoded.TrafficDirection = decodeTrafficDirection(pvn)
+	decoded.TrafficDirection = decodeTrafficDirection(tn, pvn)
 	decoded.EventType = decodeCiliumEventType(eventType, eventSubType)
 	decoded.SourceService = sourceService
 	decoded.DestinationService = destinationService
@@ -444,7 +444,30 @@ func decodeSecurityIdentities(dn *monitor.DropNotify, tn *monitor.TraceNotify, p
 	return
 }
 
-func decodeTrafficDirection(pvn *monitor.PolicyVerdictNotify) pb.TrafficDirection {
+func decodeTrafficDirection(tn *monitor.TraceNotify, pvn *monitor.PolicyVerdictNotify) pb.TrafficDirection {
+	if tn != nil {
+		// We need to access the connection tracking result from the `Reason`
+		// field to invert the direction for reply packets. The `Reason` field
+		// is populated for TRACE_TO_{LXC,HOST,STACK,PROXY} events.
+		// TRACE_TO_PROXY events happen for both ingress and egress flows,
+		// therefore we cannot determine the actual direction for them.
+		// TRACE_TO_{LXC,HOST,STACK} seem to be the only trace notifications for
+		// which we can reliably determine the traffic direction from just the
+		// event.
+		isReply := decodeIsReply(tn)
+		switch tn.ObsPoint {
+		case monitorAPI.TraceToLxc:
+			if isReply {
+				return pb.TrafficDirection_EGRESS
+			}
+			return pb.TrafficDirection_INGRESS
+		case monitorAPI.TraceToStack, monitorAPI.TraceToHost:
+			if isReply {
+				return pb.TrafficDirection_INGRESS
+			}
+			return pb.TrafficDirection_EGRESS
+		}
+	}
 	if pvn != nil {
 		if pvn.IsTrafficIngress() {
 			return pb.TrafficDirection_INGRESS
