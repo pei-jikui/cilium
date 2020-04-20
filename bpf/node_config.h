@@ -29,6 +29,7 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
 #define HEALTH_ID 4
 #define INIT_ID 5
 #define REMOTE_NODE_ID 6
+#define HOST_EP_ID 1
 #define HOST_IFINDEX_MAC { .addr = { 0xce, 0x72, 0xa7, 0x03, 0x88, 0x56 } }
 #define NAT46_PREFIX { .addr = { 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xa, 0x0, 0x0, 0x0, 0x0, 0x0 } }
 #define BPF_PKT_DIR 1
@@ -107,10 +108,11 @@ DEFINE_IPV6(SNAT_IPV6_EXTERNAL, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0
 #ifndef SKIP_DEBUG
 #define LB_DEBUG
 #endif
+#define POLICY_VERDICT_NOTIFY
 #define MONITOR_AGGREGATION 5
 #define MTU 1500
 #define EPHEMERAL_MIN 32768
-#if defined(ENABLE_MASQUERADE) || defined(ENABLE_NODEPORT)
+#if defined(ENABLE_MASQUERADE) || defined(ENABLE_NODEPORT) || defined(ENABLE_HOST_FIREWALL)
 #define CT_MAP_TCP6 test_cilium_ct_tcp6_65535
 #define CT_MAP_ANY6 test_cilium_ct_any6_65535
 #define CT_MAP_TCP4 test_cilium_ct_tcp4_65535

@@ -28,6 +28,7 @@ import (
 	"github.com/cilium/cilium/pkg/datapath"
 	"github.com/cilium/cilium/pkg/datapath/iptables"
 	"github.com/cilium/cilium/pkg/defaults"
+	"github.com/cilium/cilium/pkg/endpointmanager/idallocator"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
@@ -438,6 +439,7 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, e datapath.Endp
 	}
 
 	if e.IsHost() {
+		fmt.Fprintf(fw, "#define HOST_EP_ID %d\n", idallocator.HostEndpointID)
 		if option.Config.EnableNodePort {
 			fmt.Fprintf(fw, "#define DISABLE_LOOPBACK_LB 1\n")
 		}
