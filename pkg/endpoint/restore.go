@@ -60,16 +60,42 @@ func ReadEPsFromDirNames(ctx context.Context, owner regeneration.Owner, basePath
 	possibleEPs := map[uint16]*Endpoint{}
 	for _, epDirName := range completeEPDirNames {
 		epDir := filepath.Join(basePath, epDirName)
-		cHeaderFile := filepath.Join(epDir, common.CHeaderFileName)
+		// We only check for the old header file. On v1.8+, if the old header
+		// file is present, the new header file will be too. When upgrading
+		// from pre-1.8, only the old header file is present and we will create
+		// the new.
+		// We can switch this to use the new header file once v1.8 is the
+		// oldest supported version.
+		cHeaderFile := filepath.Join(epDir, common.OldCHeaderFileName)
 		scopedLog := log.WithFields(logrus.Fields{
 			logfields.EndpointID: epDirName,
 			logfields.Path:       cHeaderFile,
 		})
 
 		if _, err := os.Stat(cHeaderFile); err != nil {
-			scopedLog.Warning("C header file not found. Ignoring endpoint")
+			scopedLog.WithError(err).Warn("C header file not found. Ignoring endpoint")
 			continue
 		}
+
+		// This copy is only needed when upgrading from a pre-1.8 Cilium and we
+		// can thus remove it once Cilium v1.8 is the oldest supported version.
+		newCHeaderFile := filepath.Join(epDir, common.CHeaderFileName)
+		if _, err := os.Stat(newCHeaderFile); err != nil {
+			if !os.IsNotExist(err) {
+				scopedLog.WithError(err).Warn("Failed to check if C header exists. Ignoring endpoint")
+				continue
+			}
+			if err := os.Rename(cHeaderFile, newCHeaderFile); err != nil {
+				scopedLog.WithError(err).Warn("Failed to rename C header. Ignoring endpoint")
+				continue
+			}
+			if err := os.Symlink(common.CHeaderFileName, cHeaderFile); err != nil {
+				scopedLog.WithError(err).Warn("Failed to create symlink for C header. Ignoring endpoint")
+				continue
+			}
+			scopedLog.Debug("Created symlink for endpoint C header file")
+		}
+		cHeaderFile = newCHeaderFile
 
 		scopedLog.Debug("Found endpoint C header file")
 

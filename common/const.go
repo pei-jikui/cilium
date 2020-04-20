@@ -33,6 +33,10 @@ const (
 	// CHeaderFileName is the name of the C header file for BPF programs for a
 	// particular endpoint.
 	CHeaderFileName = "ep_config.h"
+	// OldCHeaderFileName is the previous name of the C header file for BPF
+	// programs for a particular endpoint. It can be removed once Cilium v1.8
+	// is the oldest supported version.
+	OldCHeaderFileName = "lxc_config.h"
 	// NetdevHeaderFileName is the name of the header file used for bpf_overlay.c.
 	NetdevHeaderFileName = "netdev_config.h"
 	// PreFilterHeaderFileName is the name of the header file used for bpf_xdp.c.
