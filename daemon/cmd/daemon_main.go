@@ -41,6 +41,7 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/loader"
 	"github.com/cilium/cilium/pkg/datapath/maps"
 	"github.com/cilium/cilium/pkg/defaults"
+	"github.com/cilium/cilium/pkg/endpointmanager/idallocator"
 	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/flowdebug"
 	"github.com/cilium/cilium/pkg/identity"
@@ -1250,6 +1251,14 @@ func runDaemon() {
 	<-k8sCachesSynced
 	bootstrapStats.k8sInit.End(true)
 	restoreComplete := d.initRestore(restoredEndpoints)
+
+	if !d.endpointManager.EndpointExists(idallocator.HostEndpointID) {
+		log.Info("Creating local node endpoint")
+		if err := d.endpointManager.AddHostEndpoint(d.ctx, d, d.l7Proxy, d.identityAllocator,
+			"Create local node endpoint", node.GetName()); err != nil {
+			log.WithError(err).Fatal("Unable to create local node endpoint")
+		}
+	}
 
 	if option.Config.IsFlannelMasterDeviceSet() {
 		if option.Config.EnableEndpointHealthChecking {

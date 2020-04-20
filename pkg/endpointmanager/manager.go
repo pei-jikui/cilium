@@ -26,6 +26,8 @@ import (
 	endpointid "github.com/cilium/cilium/pkg/endpoint/id"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/endpointmanager/idallocator"
+	"github.com/cilium/cilium/pkg/identity/cache"
+	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -444,7 +446,7 @@ func (mgr *EndpointManager) GetPolicyEndpoints() map[policy.Endpoint]struct{} {
 func (mgr *EndpointManager) AddEndpoint(owner regeneration.Owner, ep *endpoint.Endpoint, reason string) (err error) {
 	ep.SetDefaultConfiguration(false)
 
-	if ep.ID != 0 {
+	if ep.ID != 0 && ep.ID != idallocator.HostEndpointID {
 		return fmt.Errorf("Endpoint ID is already set to %d", ep.ID)
 	}
 	err = ep.Expose(mgr)
@@ -457,6 +459,21 @@ func (mgr *EndpointManager) AddEndpoint(owner regeneration.Owner, ep *endpoint.E
 	if err == nil {
 		owner.SendNotification(monitorAPI.AgentNotifyEndpointCreated, repr)
 	}
+	return nil
+}
+
+func (mgr *EndpointManager) AddHostEndpoint(ctx context.Context, owner regeneration.Owner,
+	proxy endpoint.EndpointProxy, allocator cache.IdentityAllocator, reason string, nodeName string) (err error) {
+	ep := endpoint.CreateHostEndpoint(owner, proxy, allocator)
+	if err := mgr.AddEndpoint(owner, ep, reason); err != nil {
+		return err
+	}
+
+	// Give the endpoint a security identity
+	newCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	ep.UpdateLabels(newCtx, labels.LabelHost, nil, true)
+
 	return nil
 }
 

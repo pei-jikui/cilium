@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	minID = idpool.ID(1)
-	maxID = idpool.ID(4095)
+	HostEndpointID = 1
+	minID          = idpool.ID(2)
+	maxID          = idpool.ID(4095)
 )
 
 var (
@@ -49,8 +50,13 @@ func Allocate() uint16 {
 // Reuse grabs a specific endpoint ID for reuse. This can be used when
 // restoring endpoints.
 func Reuse(id uint16) error {
+	if idpool.ID(id) == 0 {
+		return fmt.Errorf("invalid endpoint ID 0")
+	}
+
+	// This is a reserved endpoint ID.
 	if idpool.ID(id) < minID {
-		return fmt.Errorf("unable to reuse endpoint: %d < %d", id, minID)
+		return nil
 	}
 
 	// When restoring endpoints, the existing endpoint ID can be outside of

@@ -5,7 +5,11 @@
 #include <bpf/api.h>
 
 #include <node_config.h>
-#include <netdev_config.h>
+#ifdef NOT_HOST_ENDPOINT
+# include <netdev_config.h>
+#else
+# include <ep_config.h>
+#endif
 
 /* These are configuartion options which have a default value in their
  * respective header files and must thus be defined beforehand:
@@ -72,13 +76,18 @@ derive_src_id(const union v6addr *node_ip, struct ipv6hdr *ip6, __u32 *identity)
 }
 
 static __always_inline __u32
-resolve_srcid_ipv6(struct __ctx_buff *ctx, struct ipv6hdr *ip6,
-		   __u32 srcid_from_proxy, bool from_host)
+resolve_srcid_ipv6(struct __ctx_buff *ctx, __u32 srcid_from_proxy,
+		   bool from_host)
 {
 	__u32 src_id = WORLD_ID, srcid_from_ipcache = srcid_from_proxy;
 	struct remote_endpoint_info *info = NULL;
 	union v6addr *src, node_ip = {};
+	void *data, *data_end;
+	struct ipv6hdr *ip6;
 	int ret;
+
+	if (!revalidate_data(ctx, &data, &data_end, &ip6))
+		return DROP_INVALID;
 
 	if (from_host) {
 		BPF_V6(node_ip, ROUTER_IP);
@@ -111,8 +120,8 @@ resolve_srcid_ipv6(struct __ctx_buff *ctx, struct ipv6hdr *ip6,
 	return src_id;
 }
 
-static __always_inline int handle_ipv6(struct __ctx_buff *ctx,
-				       __u32 srcid_from_proxy, bool from_host)
+static __always_inline int
+handle_ipv6(struct __ctx_buff *ctx, __u32 secctx, bool from_host)
 {
 	struct remote_endpoint_info *info = NULL;
 	void *data, *data_end;
@@ -121,7 +130,6 @@ static __always_inline int handle_ipv6(struct __ctx_buff *ctx,
 	int ret, l3_off = ETH_HLEN, hdrlen;
 	struct endpoint_info *ep;
 	__u8 nexthdr;
-	__u32 secctx;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip6))
 		return DROP_INVALID;
@@ -129,7 +137,7 @@ static __always_inline int handle_ipv6(struct __ctx_buff *ctx,
 #ifdef ENABLE_NODEPORT
 	if (!from_host) {
 		if (!bpf_skip_nodeport(ctx)) {
-			ret = nodeport_lb6(ctx, srcid_from_proxy);
+			ret = nodeport_lb6(ctx, secctx);
 			if (ret < 0)
 				return ret;
 		}
@@ -155,8 +163,6 @@ static __always_inline int handle_ipv6(struct __ctx_buff *ctx,
 			return ret;
 	}
 #endif
-
-	secctx = resolve_srcid_ipv6(ctx, ip6, srcid_from_proxy, from_host);
 
 	if (from_host) {
 		/* If we are attached to cilium_host at egress, this will
@@ -256,11 +262,16 @@ int tail_handle_ipv6(struct __ctx_buff *ctx)
 
 #ifdef ENABLE_IPV4
 static __always_inline __u32
-resolve_srcid_ipv4(struct __ctx_buff *ctx, struct iphdr *ip4,
-		   __u32 srcid_from_proxy, bool from_host)
+resolve_srcid_ipv4(struct __ctx_buff *ctx, __u32 srcid_from_proxy,
+		   bool from_host __maybe_unused)
 {
 	__u32 src_id = WORLD_ID, srcid_from_ipcache = srcid_from_proxy;
 	struct remote_endpoint_info *info = NULL;
+	void *data, *data_end;
+	struct iphdr *ip4;
+
+	if (!revalidate_data(ctx, &data, &data_end, &ip4))
+		return DROP_INVALID;
 
 	/* Packets from the proxy will already have a real identity. */
 	if (identity_is_reserved(srcid_from_ipcache)) {
@@ -278,7 +289,7 @@ resolve_srcid_ipv4(struct __ctx_buff *ctx, struct iphdr *ip4,
 				 * source as HOST_ID.
 				 */
 #ifndef ENABLE_EXTRA_HOST_DEV
-				if (sec_label != HOST_ID)
+				if (!from_host && sec_label != HOST_ID)
 #endif
 					srcid_from_ipcache = sec_label;
 			}
@@ -301,15 +312,14 @@ resolve_srcid_ipv4(struct __ctx_buff *ctx, struct iphdr *ip4,
 	return src_id;
 }
 
-static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
-				       __u32 srcid_from_proxy, bool from_host)
+static __always_inline int
+handle_ipv4(struct __ctx_buff *ctx, __u32 secctx, bool from_host)
 {
 	struct remote_endpoint_info *info = NULL;
 	struct ipv4_ct_tuple tuple = {};
 	struct endpoint_info *ep;
 	void *data, *data_end;
 	struct iphdr *ip4;
-	__u32 secctx;
 	int ret;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
@@ -318,7 +328,7 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
 #ifdef ENABLE_NODEPORT
 	if (!from_host) {
 		if (!bpf_skip_nodeport(ctx)) {
-			int ret = nodeport_lb4(ctx, srcid_from_proxy);
+			ret = nodeport_lb4(ctx, secctx);
 			if (ret < 0)
 				return ret;
 		}
@@ -338,10 +348,7 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
 
 	tuple.nexthdr = ip4->protocol;
 
-	secctx = resolve_srcid_ipv4(ctx, ip4, srcid_from_proxy, from_host);
-
 	if (from_host) {
-
 		/* If we are attached to cilium_host at egress, this will
 		 * rewrite the destination mac address to the MAC of cilium_net */
 		ret = rewrite_dmac_to_host(ctx, secctx);
@@ -646,6 +653,7 @@ do_netdev_(struct __ctx_buff *ctx, __u16 proto, bool from_host)
 	switch (proto) {
 #ifdef ENABLE_IPV6
 	case bpf_htons(ETH_P_IPV6):
+		identity = resolve_srcid_ipv6(ctx, identity, from_host);
 		ctx_store_meta(ctx, CB_SRC_IDENTITY, identity);
 		ctx_store_meta(ctx, CB_FROM_HOST, from_host);
 		ep_tail_call(ctx, CILIUM_CALL_IPV6_FROM_LXC);
@@ -655,6 +663,7 @@ do_netdev_(struct __ctx_buff *ctx, __u16 proto, bool from_host)
 #endif
 #ifdef ENABLE_IPV4
 	case bpf_htons(ETH_P_IP):
+		identity = resolve_srcid_ipv4(ctx, identity, from_host);
 		ctx_store_meta(ctx, CB_SRC_IDENTITY, identity);
 		ctx_store_meta(ctx, CB_FROM_HOST, from_host);
 		ep_tail_call(ctx, CILIUM_CALL_IPV4_FROM_LXC);
@@ -738,6 +747,27 @@ int to_netdev(struct __ctx_buff *ctx __maybe_unused)
 		cilium_dbg_capture(ctx, DBG_CAPTURE_SNAT_POST, ctx_get_ifindex(ctx));
 #endif /* ENABLE_MASQUERADE */
 	return ret;
+}
+
+__section("to-host")
+int to_host(struct __ctx_buff *ctx)
+{
+	__u32 magic = ctx_load_meta(ctx, 0);
+
+	if ((magic & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_ENCRYPT) {
+		ctx->mark = magic;
+		set_identity_mark(ctx, ctx_load_meta(ctx, 1));
+	} else if ((magic & 0xFFFF) == MARK_MAGIC_TO_PROXY) {
+		/* Upper 16 bits may carry proxy port number */
+		__be16 port = magic >> 16;
+
+		ctx->mark = magic;
+		ctx_store_meta(ctx, 0, 0);
+		ctx_change_type(ctx, PACKET_HOST);
+		cilium_dbg_capture(ctx, DBG_CAPTURE_PROXY_POST, port);
+	}
+
+	return CTX_ACT_OK;
 }
 
 BPF_LICENSE("GPL");

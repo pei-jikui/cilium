@@ -162,7 +162,9 @@ func elfMapSubstitutions(ep datapath.Endpoint) map[string]string {
 		}
 	}
 
-	result[policymap.CallString(templateLxcID)] = policymap.CallString(epID)
+	if !ep.IsHost() {
+		result[policymap.CallString(templateLxcID)] = policymap.CallString(epID)
+	}
 	return result
 }
 
@@ -212,7 +214,9 @@ func elfVariableSubstitutions(ep datapath.Endpoint) map[string]uint32 {
 	mac := ep.GetNodeMAC()
 	result["NODE_MAC_1"] = sliceToBe32(mac[0:4])
 	result["NODE_MAC_2"] = uint32(sliceToBe16(mac[4:6]))
-	result["LXC_ID"] = uint32(ep.GetID())
+	if !ep.IsHost() {
+		result["LXC_ID"] = uint32(ep.GetID())
+	}
 	identity := ep.GetIdentity().Uint32()
 	result["SECLABEL"] = identity
 	result["SECLABEL_NB"] = byteorder.HostToNetwork(identity).(uint32)

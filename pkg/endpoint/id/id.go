@@ -59,6 +59,11 @@ const (
 	// Kubernetes pod.
 	PodNamePrefix PrefixType = "pod-name"
 
+	// NodeNamePrefix is used to address an endpoint via the Kubernetes node
+	// name. This addressing only works if the endpoint represents as
+	// Kubernetes node.
+	NodeNamePrefix PrefixType = "node-name"
+
 	// IPv4Prefix is used to address an endpoint via the endpoint's IPv4
 	// address.
 	IPv4Prefix PrefixType = "ipv4"

@@ -42,6 +42,11 @@ const (
 	symbolFromEndpoint = "from-container"
 	symbolToEndpoint   = "to-container"
 
+	symbolFromHostEp1 = "from-netdev"
+	symbolToHostEp1   = "to-netdev"
+	symbolFromHostEp2 = "from-host"
+	symbolToHostEp2   = "to-host"
+
 	dirIngress = "ingress"
 	dirEgress  = "egress"
 )
@@ -99,11 +104,57 @@ func removeEndpointRoute(ep datapath.Endpoint, ip net.IPNet) error {
 	})
 }
 
+func (l *Loader) reloadHostDatapath(ctx context.Context, ep datapath.Endpoint, objPath string) error {
+	symbols := [4]string{symbolToHostEp2, symbolFromHostEp2, symbolFromHostEp1, symbolToHostEp1}
+	directions := [4]string{dirIngress, dirEgress, dirIngress, dirEgress}
+
+	interfaceNames := make([]string, 2, 4)
+	if option.Config.IsFlannelMasterDeviceSet() {
+		interfaceNames[0] = option.Config.FlannelMasterDevice
+	} else {
+		interfaceNames[0] = option.Config.HostDevice
+	}
+	interfaceNames[1] = interfaceNames[0]
+	if option.Config.Device != "undefined" {
+		interfaceNames = append(interfaceNames, option.Config.Device)
+		if option.Config.EnableNodePort || option.Config.EnableHostFirewall ||
+			!option.Config.InstallIptRules && option.Config.Masquerade {
+			interfaceNames = append(interfaceNames, option.Config.Device)
+		}
+	}
+
+	for i, interfaceName := range interfaceNames {
+		dir := directions[i]
+		symbol := symbols[i]
+		if err := l.replaceDatapath(ctx, interfaceName, objPath, symbol, dir); err != nil {
+			scopedLog := ep.Logger(Subsystem).WithFields(logrus.Fields{
+				logfields.Path: objPath,
+				logfields.Veth: interfaceName,
+			})
+			// Don't log an error here if the context was canceled or timed out;
+			// this log message should only represent failures with respect to
+			// loading the program.
+			if ctx.Err() == nil {
+				scopedLog.WithError(err).Warn("JoinEP: Failed to load program")
+			}
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs *directoryInfo) error {
 	// Replace the current program
 	objPath := path.Join(dirs.Output, endpointObj)
-	if ep.HasIpvlanDataPath() {
-		if err := graftDatapath(ctx, ep.MapPath(), objPath, symbolFromEndpoint); err != nil {
+
+	if ep.IsHost() {
+		objPath = path.Join(dirs.Output, hostEndpointObj)
+		if err := l.reloadHostDatapath(ctx, ep, objPath); err != nil {
+			return err
+		}
+	} else if ep.HasIpvlanDataPath() {
+		if err := graftDatapath(ctx, ep.MapPath(), objPath, symbolToEndpoint); err != nil {
 			scopedLog := ep.Logger(Subsystem).WithFields(logrus.Fields{
 				logfields.Path: objPath,
 			})
@@ -163,7 +214,7 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs 
 func (l *Loader) compileAndLoad(ctx context.Context, ep datapath.Endpoint, dirs *directoryInfo, stats *metrics.SpanStat) error {
 	debug := option.Config.BPFCompilationDebug
 	stats.BpfCompilation.Start()
-	err := compileDatapath(ctx, dirs, debug, ep.Logger(Subsystem))
+	err := compileDatapath(ctx, dirs, ep.IsHost(), debug, ep.Logger(Subsystem))
 	stats.BpfCompilation.End(err == nil)
 	if err != nil {
 		return err
@@ -243,7 +294,11 @@ func (l *Loader) CompileOrLoad(ctx context.Context, ep datapath.Endpoint, stats 
 	}
 
 	stats.BpfWriteELF.Start()
-	dstPath := path.Join(ep.StateDir(), endpointObj)
+	epObj := endpointObj
+	if ep.IsHost() {
+		epObj = hostEndpointObj
+	}
+	dstPath := path.Join(ep.StateDir(), epObj)
 	opts, strings := ELFSubstitutions(ep)
 	if err = template.Write(dstPath, opts, strings); err != nil {
 		stats.BpfWriteELF.End(err == nil)

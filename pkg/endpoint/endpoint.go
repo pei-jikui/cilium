@@ -34,6 +34,7 @@ import (
 	"github.com/cilium/cilium/pkg/completion"
 	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
+	"github.com/cilium/cilium/pkg/endpointmanager/idallocator"
 	"github.com/cilium/cilium/pkg/eventqueue"
 	"github.com/cilium/cilium/pkg/fqdn"
 	"github.com/cilium/cilium/pkg/identity"
@@ -194,7 +195,7 @@ type Endpoint struct {
 	// confirm that no existing connection is using them.
 	DNSZombies *fqdn.DNSZombieMappings
 
-	// dnsHistoryTrigger is the trigger to write down the lxc_config.h to make
+	// dnsHistoryTrigger is the trigger to write down the ep_config.h to make
 	// sure that restores when DNS policy is in there are correct
 	dnsHistoryTrigger *trigger.Trigger
 
@@ -325,6 +326,10 @@ func (e *Endpoint) LXCMac() mac.MAC {
 	return e.mac
 }
 
+func (e *Endpoint) IsHost() bool {
+	return e.ID == idallocator.HostEndpointID
+}
+
 // closeBPFProgramChannel closes the channel that signals whether the endpoint
 // has had its BPF program compiled. If the channel is already closed, this is
 // a no-op.
@@ -420,6 +425,50 @@ func NewEndpointWithState(owner regeneration.Owner, proxy EndpointProxy, allocat
 	ep.UpdateLogger(nil)
 
 	ep.eventQueue.Run()
+
+	return ep
+}
+
+func createEndpoint(owner regeneration.Owner, proxy EndpointProxy, allocator cache.IdentityAllocator, id uint16, ifName string) *Endpoint {
+	ep := &Endpoint{
+		owner:           owner,
+		ID:              id,
+		proxy:           proxy,
+		ifName:          option.Config.HostDevice,
+		OpLabels:        pkgLabels.NewOpLabels(),
+		DNSHistory:      fqdn.NewDNSCacheWithLimit(option.Config.ToFQDNsMinTTL, option.Config.ToFQDNsMaxIPsPerHost),
+		DNSZombies:      fqdn.NewDNSZombieMappings(option.Config.ToFQDNsMaxDeferredConnectionDeletes),
+		state:           "",
+		status:          NewEndpointStatus(),
+		hasBPFProgram:   make(chan struct{}, 0),
+		desiredPolicy:   policy.NewEndpointPolicy(owner.GetPolicyRepository()),
+		controllers:     controller.NewManager(),
+		regenFailedChan: make(chan struct{}, 1),
+		allocator:       allocator,
+		exposed:         make(chan struct{}),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ep.aliveCancel = cancel
+	ep.aliveCtx = ctx
+
+	ep.realizedPolicy = ep.desiredPolicy
+
+	ep.SetDefaultOpts(option.Config.Opts)
+
+	return ep
+}
+
+// CreateHostEndpoint creates the endpoint corresponding to the host.
+func CreateHostEndpoint(owner regeneration.Owner, proxy EndpointProxy, allocator cache.IdentityAllocator) *Endpoint {
+	ep := createEndpoint(owner, proxy, allocator, idallocator.HostEndpointID, option.Config.HostDevice)
+	ep.mac = []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x1}
+	ep.nodeMAC = []byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x1}
+	ep.DatapathConfiguration = models.EndpointDatapathConfiguration{
+		RequireEgressProg: true,
+	}
+
+	ep.setState(StateWaitingForIdentity, "Endpoint creation")
 
 	return ep
 }
@@ -1971,7 +2020,7 @@ func (e *Endpoint) syncEndpointHeaderFile(reasons []string) {
 }
 
 // SyncEndpointHeaderFile it bumps the current DNS History information for the
-// endpoint in the lxc_config.h file.
+// endpoint in the ep_config.h file.
 func (e *Endpoint) SyncEndpointHeaderFile() error {
 	if err := e.lockAlive(); err != nil {
 		// endpoint was removed in the meanwhile, return

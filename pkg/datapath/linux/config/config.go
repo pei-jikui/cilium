@@ -157,6 +157,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 
 	if option.Config.DatapathMode == option.DatapathModeIpvlan {
 		cDefinesMap["ENABLE_SECCTX_FROM_IPCACHE"] = "1"
+		cDefinesMap["ENABLE_EXTRA_HOST_DEV"] = "1"
 	}
 
 	if option.Config.PreAllocateMaps {
@@ -377,29 +378,31 @@ func (h *HeaderfileWriter) WriteNetdevConfig(w io.Writer, cfg datapath.DeviceCon
 // writeStaticData writes the endpoint-specific static data defines to the
 // specified writer. This must be kept in sync with loader.ELFSubstitutions().
 func (h *HeaderfileWriter) writeStaticData(fw io.Writer, e datapath.EndpointConfiguration) {
-	// We want to ensure that the template BPF program always has "LXC_IP"
-	// defined and present as a symbol in the resulting object file after
-	// compilation, regardless of whether IPv6 is disabled. Because the type
-	// templateCfg hardcodes a dummy IPv6 address (and adheres to the
-	// datapath.EndpointConfiguration interface), we can rely on it always
-	// having an IPv6 addr. Endpoints however may not have IPv6 addrs if IPv6
-	// is disabled. Hence this check prevents us from omitting the "LXC_IP"
-	// symbol from the template BPF program. Without this, the following
-	// scenario is possible:
-	//   1) Enable IPv6 in cilium
-	//   2) Create an endpoint (ensure endpoint has an IPv6 addr)
-	//   3) Disable IPv6 and restart cilium
-	// This results in a template BPF object without an "LXC_IP" defined,
-	// __but__ the endpoint still has "LXC_IP" defined. This causes a later
-	// call to loader.ELFSubstitutions() to fail on missing a symbol "LXC_IP".
-	if e.IPv6Address() != nil {
-		fmt.Fprint(fw, defineIPv6("LXC_IP", e.IPv6Address()))
+	if !e.IsHost() {
+		// We want to ensure that the template BPF program always has "LXC_IP"
+		// defined and present as a symbol in the resulting object file after
+		// compilation, regardless of whether IPv6 is disabled. Because the type
+		// templateCfg hardcodes a dummy IPv6 address (and adheres to the
+		// datapath.EndpointConfiguration interface), we can rely on it always
+		// having an IPv6 addr. Endpoints however may not have IPv6 addrs if IPv6
+		// is disabled. Hence this check prevents us from omitting the "LXC_IP"
+		// symbol from the template BPF program. Without this, the following
+		// scenario is possible:
+		//   1) Enable IPv6 in cilium
+		//   2) Create an endpoint (ensure endpoint has an IPv6 addr)
+		//   3) Disable IPv6 and restart cilium
+		// This results in a template BPF object without an "LXC_IP" defined,
+		// __but__ the endpoint still has "LXC_IP" defined. This causes a later
+		// call to loader.ELFSubstitutions() to fail on missing a symbol "LXC_IP".
+		if e.IPv6Address() != nil {
+			fmt.Fprint(fw, defineIPv6("LXC_IP", e.IPv6Address()))
+		}
+
+		fmt.Fprint(fw, defineIPv4("LXC_IPV4", e.IPv4Address()))
+		fmt.Fprint(fw, defineUint32("LXC_ID", uint32(e.GetID())))
 	}
 
-	fmt.Fprint(fw, defineIPv4("LXC_IPV4", e.IPv4Address()))
-
 	fmt.Fprint(fw, defineMAC("NODE_MAC", e.GetNodeMAC()))
-	fmt.Fprint(fw, defineUint32("LXC_ID", uint32(e.GetID())))
 
 	secID := e.GetIdentity().Uint32()
 	fmt.Fprintf(fw, defineUint32("SECLABEL", secID))
@@ -432,6 +435,12 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, e datapath.Endp
 
 	if e.RequireRouting() {
 		fmt.Fprintf(fw, "#define ENABLE_ROUTING 1\n")
+	}
+
+	if e.IsHost() {
+		if option.Config.EnableNodePort {
+			fmt.Fprintf(fw, "#define DISABLE_LOOPBACK_LB 1\n")
+		}
 	}
 
 	if !e.HasIpvlanDataPath() {

@@ -547,19 +547,6 @@ if [ "$MODE" = "direct" ] || [ "$MODE" = "ipvlan" ] || [ "$MODE" = "routed" ] ||
 			echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
 		fi
 
-		CALLS_MAP=cilium_calls_netdev_${ID_WORLD}
-		COPTS="-DSECLABEL=${ID_WORLD}"
-		if [ "$NODE_PORT" = "true" ]; then
-			COPTS="${COPTS} -DLB_L3 -DLB_L4 -DDISABLE_LOOPBACK_LB"
-		fi
-
-		bpf_load $NATIVE_DEV "$COPTS" "ingress" bpf_netdev.c bpf_netdev.o "from-netdev" $CALLS_MAP
-		if [ "$MASQ" = "true" ] || [ "$NODE_PORT" = "true" ]; then
-			bpf_load $NATIVE_DEV "$COPTS" "egress" bpf_netdev.c bpf_netdev.o "to-netdev" $CALLS_MAP
-		else
-			bpf_unload $NATIVE_DEV "egress"
-		fi
-
 		echo "$NATIVE_DEV" > $RUNDIR/device.state
 	fi
 else
@@ -631,15 +618,9 @@ else
 	bpf_clear_cgroups $CGROUP_ROOT recvmsg6
 fi
 
-# bpf_host.o requires to see an updated node_config.h which includes ENCAP_IFINDEX
+COPTS="-DNOT_HOST_ENDPOINT=1 -DSECLABEL=${ID_WORLD}"
 CALLS_MAP="cilium_calls_netdev_ns_${ID_HOST}"
-COPTS="-DSECLABEL=${ID_HOST}"
-if [ "$MODE" == "ipvlan" ]; then
-	COPTS+=" -DENABLE_EXTRA_HOST_DEV"
-fi
-bpf_load $HOST_DEV1 "$COPTS" "egress" bpf_netdev.c bpf_host.o from-host $CALLS_MAP
-bpf_load $HOST_DEV1 "" "ingress" bpf_hostdev_ingress.c bpf_hostdev_ingress.o to-host $CALLS_MAP
-bpf_load $HOST_DEV2 "" "ingress" bpf_hostdev_ingress.c bpf_hostdev_ingress.o to-host $CALLS_MAP
+bpf_load $HOST_DEV2 "$COPTS" "ingress" bpf_netdev.c bpf_hostdev_ingress.o to-host $CALLS_MAP
 if [ "$IPSEC" == "true" ]; then
 	if [ "$ENCRYPT_DEV" != "<nil>" ]; then
 		bpf_load $ENCRYPT_DEV "" "ingress" bpf_network.c bpf_network.o from-network $CALLS_MAP

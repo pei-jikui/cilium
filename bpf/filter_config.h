@@ -15,3 +15,4 @@
 #define CIDR6_LMAP_NAME v6_dyn
 #define CIDR6_FILTER
 #define CIDR6_LPM_PREFILTER
+#define CONNTRACK

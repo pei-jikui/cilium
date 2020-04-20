@@ -32,8 +32,8 @@ const (
 	NodeConfigFile = "node_config.h"
 	// CHeaderFileName is the name of the C header file for BPF programs for a
 	// particular endpoint.
-	CHeaderFileName = "lxc_config.h"
-	// NetdevHeaderFileName is the name of the header file used for bpf_netdev.c and bpf_overlay.c.
+	CHeaderFileName = "ep_config.h"
+	// NetdevHeaderFileName is the name of the header file used for bpf_overlay.c.
 	NetdevHeaderFileName = "netdev_config.h"
 	// PreFilterHeaderFileName is the name of the header file used for bpf_xdp.c.
 	PreFilterHeaderFileName = "filter_config.h"

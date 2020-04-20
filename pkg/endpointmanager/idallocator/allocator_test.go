@@ -55,8 +55,8 @@ func (s *IDSuite) TestReuse(c *C) {
 	// Reusing IDs greater than the maxID is allowed
 	c.Assert(Reuse(uint16(maxID+10)), IsNil)
 
-	// Reusing IDs lesser than the minID is not allowed
-	c.Assert(Reuse(uint16(minID-1)), Not(IsNil))
+	// Reusing reserved IDs is allowed
+	c.Assert(Reuse(uint16(HostEndpointID)), IsNil)
 
 	idsReturned := map[uint16]struct{}{}
 
