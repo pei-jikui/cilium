@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,35 +60,13 @@ func ReadEPsFromDirNames(ctx context.Context, owner regeneration.Owner, basePath
 	possibleEPs := map[uint16]*Endpoint{}
 	for _, epDirName := range completeEPDirNames {
 		epDir := filepath.Join(basePath, epDirName)
-		readDir := func() string {
-			scopedLog := log.WithFields(logrus.Fields{
-				logfields.EndpointID: epDirName,
-				logfields.Path:       filepath.Join(epDir, common.CHeaderFileName),
-			})
-			scopedLog.Debug("Reading directory")
-			epFiles, err := ioutil.ReadDir(epDir)
-			if err != nil {
-				scopedLog.WithError(err).Warn("Error while reading directory. Ignoring it...")
-				return ""
-			}
-			cHeaderFile := common.FindEPConfigCHeader(epDir, epFiles)
-			if cHeaderFile == "" {
-				return ""
-			}
-			return cHeaderFile
-		}
-		// There's an odd issue where the first read dir doesn't work.
-		cHeaderFile := readDir()
-		if cHeaderFile == "" {
-			cHeaderFile = readDir()
-		}
-
+		cHeaderFile := filepath.Join(epDir, common.CHeaderFileName)
 		scopedLog := log.WithFields(logrus.Fields{
 			logfields.EndpointID: epDirName,
 			logfields.Path:       cHeaderFile,
 		})
 
-		if cHeaderFile == "" {
+		if _, err := os.Stat(cHeaderFile); err != nil {
 			scopedLog.Warning("C header file not found. Ignoring endpoint")
 			continue
 		}
