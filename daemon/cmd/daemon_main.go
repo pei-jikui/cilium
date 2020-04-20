@@ -1074,6 +1074,8 @@ func initEnv(cmd *cobra.Command) {
 		}
 	}
 
+	checkHostFirewallWithEgressLB()
+
 	initKubeProxyReplacementOptions()
 
 	if option.Config.EnableHostFirewall && option.Config.Device == "undefined" {
@@ -1458,6 +1460,42 @@ func (d *Daemon) instantiateAPI() *restapi.CiliumAPI {
 	restAPI.PolicyGetIPHandler = NewGetIPHandler()
 
 	return restAPI
+}
+
+func checkHostFirewallWithEgressLB() {
+	// Egress LB is enabled in datapath under condition:
+	// ENABLE_SERVICES && (!ENABLE_HOST_SERVICES_FULL || \
+	//                    (ENABLE_EXTERNAL_IP && !BPF_HAVE_NETNS_COOKIE))
+	// We can't enable both egress LB and host firewall on kernels <4.14 due to
+	// the verifier complexity limit, at 96k instructions.
+	netnsCookieSupport := false
+	if h1, h2 := probes.NewProbeManager().GetHelpers("cgroup_sock_addr"),
+		probes.NewProbeManager().GetHelpers("cgroup_sock"); h1 != nil && h2 != nil {
+		if _, ok := h1["bpf_get_netns_cookie"]; ok {
+			if _, ok := h2["bpf_get_netns_cookie"]; ok {
+				netnsCookieSupport = true
+			}
+		}
+	}
+	egressLBEnabled := !option.Config.DisableK8sServices &&
+		(!option.Config.EnableHostServicesTCP || !option.Config.EnableHostServicesUDP ||
+			(option.Config.EnableExternalIPs && !netnsCookieSupport))
+	if option.Config.EnableHostFirewall && egressLBEnabled {
+		// We can probe the verifier's complexity limit (128k here) indirectly
+		// based on what kernel helpers are available since both were changed
+		// in the same release, v4.14.
+		found := false
+		if h := probes.NewProbeManager().GetHelpers("xdp"); h != nil {
+			if _, ok := h["bpf_redirect_map"]; ok {
+				found = true
+			}
+		}
+		if !found {
+			log.Warn("Enabling both east-west load balancing and the host firewall requires a kernel 4.14+. Disabling east-west load balancing.")
+			option.Config.DisableK8sServices = true
+			option.Config.KubeProxyReplacement = option.KubeProxyReplacementDisabled
+		}
+	}
 }
 
 func initKubeProxyReplacementOptions() {
