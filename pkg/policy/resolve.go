@@ -108,7 +108,7 @@ func (p *selectorPolicy) Detach() {
 // SelectorCache. These can subsequently be plumbed into the datapath.
 //
 // Must be performed while holding the Repository lock.
-func (p *selectorPolicy) DistillPolicy(policyOwner PolicyOwner) *EndpointPolicy {
+func (p *selectorPolicy) DistillPolicy(policyOwner PolicyOwner, isHost bool) *EndpointPolicy {
 	calculatedPolicy := &EndpointPolicy{
 		selectorPolicy: p,
 		PolicyMapState: make(MapState),
@@ -136,7 +136,9 @@ func (p *selectorPolicy) DistillPolicy(policyOwner PolicyOwner) *EndpointPolicy 
 	// PolicyMapCanges will contain all changes that are applied
 	// after the computation of PolicyMapState has started.
 	calculatedPolicy.computeDesiredL4PolicyMapEntries()
-	calculatedPolicy.PolicyMapState.DetermineAllowLocalhostIngress(p.L4Policy)
+	if !isHost {
+		calculatedPolicy.PolicyMapState.DetermineAllowLocalhostIngress(p.L4Policy)
+	}
 
 	return calculatedPolicy
 }

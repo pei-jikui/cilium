@@ -45,12 +45,23 @@ func (r Rule) Sanitize() error {
 		}
 	}
 
-	if r.EndpointSelector.LabelSelector == nil {
-		return fmt.Errorf("rule cannot have nil EndpointSelector")
+	if r.EndpointSelector.LabelSelector == nil && r.NodeSelector.LabelSelector == nil {
+		return fmt.Errorf("rule cannot have both nil EndpointSelector and nil NodeSelector")
+	}
+	if r.EndpointSelector.LabelSelector != nil && r.NodeSelector.LabelSelector != nil {
+		return fmt.Errorf("rule cannot have both EndpointSelector and NodeSelector")
 	}
 
-	if err := r.EndpointSelector.sanitize(); err != nil {
-		return err
+	if r.EndpointSelector.LabelSelector != nil {
+		if err := r.EndpointSelector.sanitize(); err != nil {
+			return err
+		}
+	}
+
+	if r.NodeSelector.LabelSelector != nil {
+		if err := r.NodeSelector.sanitize(); err != nil {
+			return err
+		}
 	}
 
 	for i := range r.Ingress {

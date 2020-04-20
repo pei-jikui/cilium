@@ -54,6 +54,10 @@ func (d *dummyEndpoint) GetID16() uint16 {
 	return d.ID
 }
 
+func (d *dummyEndpoint) IsHost() bool {
+	return false
+}
+
 func (d *dummyEndpoint) GetSecurityIdentity() (*identity.Identity, error) {
 	return d.SecurityIdentity, nil
 }
@@ -212,7 +216,7 @@ func (ds *PolicyTestSuite) BenchmarkRegenerateCIDRPolicyRules(c *C) {
 	c.ResetTimer()
 	for i := 0; i < c.N; i++ {
 		ip, _ := testRepo.resolvePolicyLocked(fooIdentity)
-		_ = ip.DistillPolicy(DummyOwner{})
+		_ = ip.DistillPolicy(DummyOwner{}, false)
 		ip.Detach()
 	}
 }
@@ -222,7 +226,7 @@ func (ds *PolicyTestSuite) BenchmarkRegenerateL3IngressPolicyRules(c *C) {
 	c.ResetTimer()
 	for i := 0; i < c.N; i++ {
 		ip, _ := testRepo.resolvePolicyLocked(fooIdentity)
-		_ = ip.DistillPolicy(DummyOwner{})
+		_ = ip.DistillPolicy(DummyOwner{}, false)
 		ip.Detach()
 	}
 }
@@ -232,7 +236,7 @@ func (ds *PolicyTestSuite) BenchmarkRegenerateL3EgressPolicyRules(c *C) {
 	c.ResetTimer()
 	for i := 0; i < c.N; i++ {
 		ip, _ := testRepo.resolvePolicyLocked(fooIdentity)
-		_ = ip.DistillPolicy(DummyOwner{})
+		_ = ip.DistillPolicy(DummyOwner{}, false)
 		ip.Detach()
 	}
 }
@@ -274,7 +278,7 @@ func (ds *PolicyTestSuite) TestL7WithIngressWildcard(c *C) {
 	defer repo.Mutex.RUnlock()
 	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
 	c.Assert(err, IsNil)
-	policy := selPolicy.DistillPolicy(DummyOwner{})
+	policy := selPolicy.DistillPolicy(DummyOwner{}, false)
 
 	expectedEndpointPolicy := EndpointPolicy{
 		selectorPolicy: &selectorPolicy{
@@ -363,7 +367,7 @@ func (ds *PolicyTestSuite) TestL7WithLocalHostWildcardd(c *C) {
 
 	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
 	c.Assert(err, IsNil)
-	policy := selPolicy.DistillPolicy(DummyOwner{})
+	policy := selPolicy.DistillPolicy(DummyOwner{}, false)
 
 	cachedSelectorHost := testSelectorCache.FindCachedIdentitySelector(api.ReservedEndpointSelectors[labels.IDNameHost])
 	c.Assert(cachedSelectorHost, Not(IsNil))
@@ -451,7 +455,7 @@ func (ds *PolicyTestSuite) TestMapStateWithIngressWildcard(c *C) {
 	defer repo.Mutex.RUnlock()
 	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
 	c.Assert(err, IsNil)
-	policy := selPolicy.DistillPolicy(DummyOwner{})
+	policy := selPolicy.DistillPolicy(DummyOwner{}, false)
 
 	rule1MapStateEntry := NewMapStateEntry(labels.LabelArrayList{ruleLabel}, false)
 	allowEgressMapStateEntry := NewMapStateEntry(labels.LabelArrayList{ruleLabelAllowAnyEgress}, false)
@@ -556,7 +560,7 @@ func (ds *PolicyTestSuite) TestMapStateWithIngress(c *C) {
 	defer repo.Mutex.RUnlock()
 	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
 	c.Assert(err, IsNil)
-	policy := selPolicy.DistillPolicy(DummyOwner{})
+	policy := selPolicy.DistillPolicy(DummyOwner{}, false)
 
 	// Add new identity to test accumulation of PolicyMapChanges
 	added1 := cache.IdentityCache{
