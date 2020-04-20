@@ -448,6 +448,7 @@ enum {
 	CB_SRC_LABEL,
 #define	CB_SVC_PORT		CB_SRC_LABEL	/* Alias, non-overlapping */
 	CB_IFINDEX,
+#define CB_FROM_HOST		CB_IFINDEX	/* Alias, non-overlapping */
 #define	CB_SVC_ADDR_V4		CB_IFINDEX	/* Alias, non-overlapping */
 #define	CB_SVC_ADDR_V6_1	CB_IFINDEX	/* Alias, non-overlapping */
 	CB_POLICY,

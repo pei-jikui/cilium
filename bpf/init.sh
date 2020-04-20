@@ -633,11 +633,11 @@ fi
 
 # bpf_host.o requires to see an updated node_config.h which includes ENCAP_IFINDEX
 CALLS_MAP="cilium_calls_netdev_ns_${ID_HOST}"
-COPTS="-DFROM_HOST -DSECLABEL=${ID_HOST}"
+COPTS="-DSECLABEL=${ID_HOST}"
 if [ "$MODE" == "ipvlan" ]; then
 	COPTS+=" -DENABLE_EXTRA_HOST_DEV"
 fi
-bpf_load $HOST_DEV1 "$COPTS" "egress" bpf_netdev.c bpf_host.o from-netdev $CALLS_MAP
+bpf_load $HOST_DEV1 "$COPTS" "egress" bpf_netdev.c bpf_host.o from-host $CALLS_MAP
 bpf_load $HOST_DEV1 "" "ingress" bpf_hostdev_ingress.c bpf_hostdev_ingress.o to-host $CALLS_MAP
 bpf_load $HOST_DEV2 "" "ingress" bpf_hostdev_ingress.c bpf_hostdev_ingress.o to-host $CALLS_MAP
 if [ "$IPSEC" == "true" ]; then
