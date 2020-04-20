@@ -242,21 +242,31 @@ handle_ipv6(struct __ctx_buff *ctx, __u32 secctx, bool from_host)
 	return CTX_ACT_OK;
 }
 
-__section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV6_FROM_LXC)
-int tail_handle_ipv6(struct __ctx_buff *ctx)
+static __always_inline int
+tail_handle_ipv6(struct __ctx_buff *ctx, bool from_host)
 {
 	__u32 proxy_identity = ctx_load_meta(ctx, CB_SRC_IDENTITY);
-	bool from_host = ctx_load_meta(ctx, CB_FROM_HOST);
 	int ret;
 
 	ctx_store_meta(ctx, CB_SRC_IDENTITY, 0);
-	ctx_store_meta(ctx, CB_FROM_HOST, 0);
 
 	ret = handle_ipv6(ctx, proxy_identity, from_host);
 	if (IS_ERR(ret))
 		return send_drop_notify_error(ctx, proxy_identity, ret,
 					      CTX_ACT_DROP, METRIC_INGRESS);
 	return ret;
+}
+
+__section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV6_FROM_HOST)
+int tail_handle_ipv6_from_host(struct __ctx_buff *ctx __maybe_unused)
+{
+	return tail_handle_ipv6(ctx, true);
+}
+
+__section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV6_FROM_LXC)
+int tail_handle_ipv6_from_netdev(struct __ctx_buff *ctx)
+{
+	return tail_handle_ipv6(ctx, false);
 }
 #endif /* ENABLE_IPV6 */
 
@@ -436,15 +446,13 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 secctx, bool from_host)
 #endif
 }
 
-__section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV4_FROM_LXC)
-int tail_handle_ipv4(struct __ctx_buff *ctx)
+static __always_inline int
+tail_handle_ipv4(struct __ctx_buff *ctx, bool from_host)
 {
 	__u32 proxy_identity = ctx_load_meta(ctx, CB_SRC_IDENTITY);
-	bool from_host = ctx_load_meta(ctx, CB_FROM_HOST);
 	int ret;
 
 	ctx_store_meta(ctx, CB_SRC_IDENTITY, 0);
-	ctx_store_meta(ctx, CB_FROM_HOST, 0);
 
 	ret = handle_ipv4(ctx, proxy_identity, from_host);
 	if (IS_ERR(ret))
@@ -452,6 +460,17 @@ int tail_handle_ipv4(struct __ctx_buff *ctx)
 	return ret;
 }
 
+__section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV4_FROM_HOST)
+int tail_handle_ipv4_from_host(struct __ctx_buff *ctx)
+{
+	return tail_handle_ipv4(ctx, true);
+}
+
+__section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV4_FROM_LXC)
+int tail_handle_ipv4_from_netdev(struct __ctx_buff *ctx)
+{
+	return tail_handle_ipv4(ctx, false);
+}
 #endif /* ENABLE_IPV4 */
 
 #ifdef ENABLE_IPSEC
@@ -655,8 +674,10 @@ do_netdev_(struct __ctx_buff *ctx, __u16 proto, bool from_host)
 	case bpf_htons(ETH_P_IPV6):
 		identity = resolve_srcid_ipv6(ctx, identity, from_host);
 		ctx_store_meta(ctx, CB_SRC_IDENTITY, identity);
-		ctx_store_meta(ctx, CB_FROM_HOST, from_host);
-		ep_tail_call(ctx, CILIUM_CALL_IPV6_FROM_LXC);
+		if (from_host)
+			ep_tail_call(ctx, CILIUM_CALL_IPV6_FROM_HOST);
+		else
+			ep_tail_call(ctx, CILIUM_CALL_IPV6_FROM_LXC);
 		/* See comment below for IPv4. */
 		return send_drop_notify_error(ctx, identity, DROP_MISSED_TAIL_CALL,
 					      CTX_ACT_OK, METRIC_INGRESS);
@@ -665,8 +686,10 @@ do_netdev_(struct __ctx_buff *ctx, __u16 proto, bool from_host)
 	case bpf_htons(ETH_P_IP):
 		identity = resolve_srcid_ipv4(ctx, identity, from_host);
 		ctx_store_meta(ctx, CB_SRC_IDENTITY, identity);
-		ctx_store_meta(ctx, CB_FROM_HOST, from_host);
-		ep_tail_call(ctx, CILIUM_CALL_IPV4_FROM_LXC);
+		if (from_host)
+			ep_tail_call(ctx, CILIUM_CALL_IPV4_FROM_HOST);
+		else
+			ep_tail_call(ctx, CILIUM_CALL_IPV4_FROM_LXC);
 		/* We are not returning an error here to always allow traffic to
 		 * the stack in case maps have become unavailable.
 		 *
